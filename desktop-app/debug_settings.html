@@ -1,0 +1,139 @@
+
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">Cài đặt</h1>
+            <p class="page-subtitle">Tùy chỉnh UniversalDownloader</p>
+          </div>
+          <button class="btn btn-primary" id="saveSettingsBtn">Lưu cài đặt</button>
+        </div>
+
+        <div class="settings-grid">
+          <div class="settings-section">
+            <h2 class="section-title">📁 Thư mục lưu</h2>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label">Thư mục tải xuống</label>
+                <span class="setting-desc">Nơi lưu trữ tất cả file đã tải</span>
+              </div>
+              <div class="setting-control dir-picker">
+                <input type="text" id="saveDir" class="input" placeholder="C:\Users\...\Downloads\UniversalDL" readonly="">
+                <button class="btn btn-ghost btn-sm" id="browseDirBtn">Chọn...</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h2 class="section-title">⬇️ Tải xuống</h2>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label">Chất lượng mặc định</label>
+                <span class="setting-desc">Chất lượng video khi tải nhanh</span>
+              </div>
+              <div class="setting-control" style="min-width: 280px">
+                <select id="defaultQuality" class="select">
+                  <option value="best">Tốt nhất (tự động)</option>
+                  <option value="1080">1080p</option>
+                  <option value="720">720p</option>
+                  <option value="480">480p</option>
+                  <option value="360">360p</option>
+                </select>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label">Định dạng mặc định</label>
+                <span class="setting-desc">Format video đầu ra</span>
+              </div>
+              <div class="setting-control" style="min-width: 280px">
+                <select id="defaultFormat" class="select">
+                  <option value="mp4">MP4 (phổ biến nhất)</option>
+                  <option value="webm">WebM</option>
+                  <option value="mkv">MKV</option>
+                </select>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label">Số luồng tải đồng thời</label>
+                <span class="setting-desc">Tải nhiều file cùng lúc (1-5)</span>
+              </div>
+              <div class="setting-control" style="min-width: 280px">
+                <select id="maxConcurrent" class="select">
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3" selected="">3 (mặc định)</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h2 class="section-title">🔧 Công cụ</h2>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label">yt-dlp</label>
+                <span class="setting-desc">Engine tải video (bắt buộc)</span>
+              </div>
+              <div class="setting-control tool-row">
+                <input type="text" id="ytdlpPath" class="input" placeholder="yt-dlp (tự động tìm trong PATH)">
+                <span class="tool-status" id="ytdlpStatus">✅</span>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label">ffmpeg</label>
+                <span class="setting-desc">Xử lý và merge video/audio</span>
+              </div>
+              <div class="setting-control tool-row">
+                <input type="text" id="ffmpegPath" class="input" placeholder="ffmpeg (tự động tìm trong PATH)">
+                <span class="tool-status" id="ffmpegStatus">✅</span>
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label">Tải công cụ</label>
+                <span class="setting-desc">Nếu chưa có yt-dlp hoặc ffmpeg</span>
+              </div>
+              <div style="display:flex;gap:8px">
+                <a href="https://github.com/yt-dlp/yt-dlp/releases/latest" target="_blank" class="btn btn-ghost btn-sm">
+                  Tải yt-dlp ↗
+                </a>
+                <a href="https://ffmpeg.org/download.html" target="_blank" class="btn btn-ghost btn-sm">
+                  Tải ffmpeg ↗
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h2 class="section-title">✨ Cấu hình Gemini AI Extractor</h2>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label">Gemini API Key</label>
+                <span class="setting-desc">Dùng để quét link ẩn từ các trang web phức tạp (đăng ký tại Google AI Studio)</span>
+              </div>
+              <div class="setting-control" style="min-width:280px">
+                <input type="password" id="geminiAPIKey" class="input" placeholder="Dán Gemini API Key tại đây (AIzaSy...)">
+              </div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <label class="setting-label">Gemini Model</label>
+                <span class="setting-desc">Mô hình AI sử dụng (mặc định: gemini-3.1-flash-lite)</span>
+              </div>
+              <div class="setting-control" style="min-width:280px">
+                <select id="geminiModel" class="select">
+                  <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (Nhanh &amp; Tiết kiệm nhất - Khuyên dùng)</option>
+                  <option value="gemini-3.1-flash">Gemini 3.1 Flash (Tốc độ cao)</option>
+                  <option value="gemini-3.5-flash">Gemini 3.5 Flash (Thế hệ mới thông minh)</option>
+                  <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
+                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (Thế hệ cũ)</option>
+                  <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+      
