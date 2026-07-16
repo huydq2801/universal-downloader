@@ -69,6 +69,7 @@ async function loadInitialData() {
     refreshQueue(),
     checkTools(),
     loadVersion(),
+    loadSettings(),
   ]);
 }
 
