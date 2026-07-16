@@ -8,7 +8,6 @@ import (
 
 	"universal-downloader/internal/downloader"
 	"universal-downloader/internal/queue"
-	"universal-downloader/internal/server"
 	"universal-downloader/internal/storage"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -16,10 +15,9 @@ import (
 
 // App struct — Wails app
 type App struct {
-	ctx       context.Context
-	db        *storage.Database
-	queue     *queue.Manager
-	httpSrv   *server.Server
+	ctx   context.Context
+	db    *storage.Database
+	queue *queue.Manager
 }
 
 // NewApp tạo App instance mới
@@ -50,14 +48,6 @@ func (a *App) startup(ctx context.Context) {
 		runtime.EventsEmit(ctx, "download:progress", update)
 	})
 	a.queue.Start(3) // 3 workers song song
-
-	// Khởi tạo HTTP server (để extension giao tiếp)
-	a.httpSrv = server.NewServer(a.queue, db, a.ctx)
-	go func() {
-		if err := a.httpSrv.Run(":7890"); err != nil {
-			runtime.LogErrorf(ctx, "HTTP server lỗi: %v", err)
-		}
-	}()
 
 	runtime.LogInfo(ctx, "UniversalDownloader đã khởi động ✓")
 }
