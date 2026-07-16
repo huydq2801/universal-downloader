@@ -5,6 +5,22 @@
 
 const BACKEND_URL = 'http://localhost:7890';
 
+// === TỰ CONSTRUCT THUMBNAIL URL TỪ PAGE URL ===
+function buildThumbnailFromPageUrl(pageUrl) {
+  try {
+    const u = new URL(pageUrl || '');
+    const host = u.hostname.replace('www.', '');
+    // YouTube
+    if (host === 'youtube.com' || host === 'youtu.be') {
+      const vid = host === 'youtu.be'
+        ? u.pathname.slice(1)
+        : u.searchParams.get('v');
+      if (vid) return `https://img.youtube.com/vi/${vid}/hqdefault.jpg`;
+    }
+    return '';
+  } catch { return ''; }
+}
+
 let mediaList = [];
 let selectedIds = new Set();
 let currentFilter = 'all';
@@ -216,8 +232,11 @@ function createItemEl(item) {
   const sizeStr = item.size ? fmtSize(item.size) : '';
   const isYtdlp = item.source === 'ytdlp' || item.source === 'ytdlp-format';
 
-  // Thumbnail: prefer item thumbnail, then page thumbnail
-  const thumb = item.thumbnail || currentPageThumbnail || '';
+  // Thumbnail: item -> pageThumbnail từ background -> tự build từ URL
+  const thumb =
+    item.thumbnail ||
+    currentPageThumbnail ||
+    buildThumbnailFromPageUrl(currentPageUrl);
   const qualityLabel = item.qualityLabel || item.quality || '';
 
   const el = document.createElement('div');
