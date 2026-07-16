@@ -1,11 +1,44 @@
 /**
- * UniversalDownloader — Background Service Worker (v2)
- * 
- * Chiến lược phát hiện media:
- * 1. Bắt webRequest (HLS/DASH/MP4 trực tiếp từ network)
- * 2. Nhận thông báo từ content scripts (inject.js hook vào fetch/XHR/blob)
- * 3. Với YouTube/các trang phức tạp: gửi URL trang web sang backend (yt-dlp info)
+ * UniversalDownloader — Background Service Worker (v3)
+ * Detect media + extract quality/thumbnail
  */
+
+// YouTube itag -> quality label
+const YTDLP_ITAG_QUALITY = {
+  '22':  { q: '720p',  label: '720p MP4 (video+audio)', type: 'video' },
+  '18':  { q: '360p',  label: '360p MP4 (video+audio)', type: 'video' },
+  '137': { q: '1080p', label: '1080p MP4 (video only)', type: 'video' },
+  '248': { q: '1080p', label: '1080p WebM (video only)', type: 'video' },
+  '136': { q: '720p',  label: '720p MP4 (video only)',  type: 'video' },
+  '247': { q: '720p',  label: '720p WebM (video only)', type: 'video' },
+  '135': { q: '480p',  label: '480p MP4 (video only)',  type: 'video' },
+  '244': { q: '480p',  label: '480p WebM (video only)', type: 'video' },
+  '134': { q: '360p',  label: '360p MP4 (video only)',  type: 'video' },
+  '243': { q: '360p',  label: '360p WebM (video only)', type: 'video' },
+  '133': { q: '240p',  label: '240p MP4 (video only)',  type: 'video' },
+  '242': { q: '240p',  label: '240p WebM (video only)', type: 'video' },
+  '160': { q: '144p',  label: '144p MP4 (video only)',  type: 'video' },
+  '278': { q: '144p',  label: '144p WebM (video only)', type: 'video' },
+  '140': { q: '128k',  label: 'M4A Audio 128kbps',      type: 'audio' },
+  '251': { q: '160k',  label: 'WebM Audio 160kbps',     type: 'audio' },
+  '139': { q: '48k',   label: 'M4A Audio 48kbps',       type: 'audio' },
+  '171': { q: '128k',  label: 'WebM Audio 128kbps',     type: 'audio' },
+};
+
+function parseYouTubeStream(url) {
+  try {
+    const u = new URL(url);
+    if (!u.hostname.includes('googlevideo.com')) return null;
+    const itag = u.searchParams.get('itag');
+    const info = itag ? YTDLP_ITAG_QUALITY[itag] : null;
+    return {
+      itag,
+      quality: info?.q || u.searchParams.get('quality') || '',
+      label:   info?.label || (itag ? `itag=${itag}` : ''),
+      mediaType: info?.type || 'video',
+    };
+  } catch { return null; }
+}
 
 const BACKEND_URL = 'http://localhost:7890';
 
@@ -95,6 +128,7 @@ function getTabData(tabId) {
       mediaList: [],
       pageTitle: '',
       pageUrl: '',
+      pageThumbnail: '',
       ytdlpChecked: false,
     });
   }
@@ -107,13 +141,25 @@ function addMediaToTab(tabId, item) {
   // Lọc HLS segments
   if (item.type === 'hls-segment') return;
 
-  // Dedup theo URL
-  if (data.mediaList.some(m => m.url === item.url)) return;
+  // YouTube stream: dedup theo itag (chất lượng) thay vì URL đầy đủ
+  // (YouTube gửi nhiều requests cho cùng 1 quality để buffer)
+  if (item.itag) {
+    if (data.mediaList.some(m => m.itag === item.itag)) return;
+  } else {
+    // Dedup theo URL
+    if (data.mediaList.some(m => m.url === item.url)) return;
+  }
+
+  // Nếu item không có thumbnail, dùng thumbnail của tab
+  const thumbnail = item.thumbnail || data.pageThumbnail || '';
+  const title = item.title || data.pageTitle || '';
 
   data.mediaList.push({
     id: Date.now() + Math.random(),
     timestamp: Date.now(),
     ...item,
+    thumbnail,
+    title,
   });
 
   updateBadge(tabId, data.mediaList.length);
@@ -144,13 +190,21 @@ chrome.webRequest.onResponseStarted.addListener(
     }
 
     if (isMediaUrl(url, contentType)) {
+      // Thử parse YouTube stream info
+      const ytStream = parseYouTubeStream(url);
+      const tabData = getTabData(tabId);
+
       addMediaToTab(tabId, {
         url,
-        type: classifyMedia(url, contentType),
+        type: ytStream?.mediaType || classifyMedia(url, contentType),
         contentType,
         size: contentLength,
         source: 'network',
-        quality: extractQualityHint(url),
+        quality: ytStream?.quality || extractQualityHint(url),
+        qualityLabel: ytStream?.label || '',
+        itag: ytStream?.itag || null,
+        title: tabData.pageTitle || '',
+        thumbnail: tabData.pageThumbnail || '',
       });
     }
   },
@@ -183,7 +237,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     case 'GET_MEDIA_LIST': {
-      // Lấy tab hiện tại để biết tabId thực
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const activeTabId = tabs[0]?.id || tabId;
         const data = getTabData(activeTabId);
@@ -191,10 +244,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           mediaList: data.mediaList,
           pageTitle: data.pageTitle,
           pageUrl: data.pageUrl,
+          pageThumbnail: data.pageThumbnail || '',
           ytdlpChecked: data.ytdlpChecked,
         });
       });
-      return true; // async
+      return true;
     }
 
     case 'FETCH_YTDLP_INFO': {
@@ -220,6 +274,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const data = getTabData(tabId);
         data.pageTitle = message.title || data.pageTitle;
         data.pageUrl = message.url || data.pageUrl;
+        if (message.thumbnail) data.pageThumbnail = message.thumbnail;
+        // Cập nhật thumbnail cho tất cả items hiện có chưa có thumbnail
+        for (const m of data.mediaList) {
+          if (!m.thumbnail && message.thumbnail) m.thumbnail = message.thumbnail;
+          if (!m.title && message.title) m.title = message.title;
+        }
       }
       break;
     }

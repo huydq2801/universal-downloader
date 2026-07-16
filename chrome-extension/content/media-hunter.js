@@ -1,150 +1,160 @@
 /**
- * UniversalDownloader — Media Hunter Content Script
- * 
- * Chạy trong context của trang web, hook vào:
- * 1. fetch() API
- * 2. XMLHttpRequest
- * 3. <video> và <audio> elements
- * 4. URL.createObjectURL (blob URLs)
- * 
- * Chú ý: Script này chạy trong isolated world của extension.
- * Để hook vào page's JS context, cần inject qua inject.js (xem stream-interceptor.js)
+ * UniversalDownloader — Media Hunter v3
+ * - Gửi thumbnail của trang (YouTube: dùng video ID)
+ * - Gửi title thực từ DOM
+ * - Detect quality từ <video> element
  */
 
 (function() {
   'use strict';
-  
-  // Tránh inject nhiều lần
   if (window.__universalDLInjected) return;
   window.__universalDLInjected = true;
-  
-  // Gửi page info lên background
-  chrome.runtime.sendMessage({
-    type: 'PAGE_INFO',
-    title: document.title,
-    url: location.href,
-  });
-  
-  // Cập nhật title khi thay đổi
-  const titleObserver = new MutationObserver(() => {
+
+  // ===== PAGE INFO + THUMBNAIL =====
+
+  function getYouTubeVideoId(url) {
+    try {
+      const u = new URL(url);
+      return u.searchParams.get('v') || u.pathname.slice(1); // youtu.be/ID
+    } catch { return null; }
+  }
+
+  function getPageThumbnail() {
+    // YouTube: dùng video ID để lấy thumbnail chất lượng cao
+    const ytId = getYouTubeVideoId(location.href);
+    if (ytId && ytId.length > 5) {
+      return `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`;
+    }
+    // OG image
+    const og = document.querySelector('meta[property="og:image"]')?.content;
+    if (og) return og;
+    // Twitter card
+    const tc = document.querySelector('meta[name="twitter:image"]')?.content;
+    if (tc) return tc;
+    // Poster của video đầu tiên
+    const poster = document.querySelector('video[poster]')?.poster;
+    if (poster) return poster;
+    return '';
+  }
+
+  function getCleanTitle() {
+    // YouTube: lấy từ h1.ytd-watch-metadata hoặc title thực
+    const ytTitle =
+      document.querySelector('h1.ytd-watch-metadata yt-formatted-string')?.textContent ||
+      document.querySelector('h1.title')?.textContent ||
+      document.querySelector('#title h1')?.textContent ||
+      document.querySelector('meta[property="og:title"]')?.content ||
+      document.querySelector('meta[name="twitter:title"]')?.content;
+    if (ytTitle && ytTitle.trim().length > 0) return ytTitle.trim();
+    return document.title.replace(/ - YouTube$/, '').replace(/ \| .+$/, '').trim();
+  }
+
+  function sendPageInfo() {
     chrome.runtime.sendMessage({
       type: 'PAGE_INFO',
-      title: document.title,
+      title: getCleanTitle(),
       url: location.href,
+      thumbnail: getPageThumbnail(),
     });
-  });
-  titleObserver.observe(document.querySelector('title') || document.head, {
-    childList: true,
-    subtree: true,
-    characterData: true,
+  }
+
+  // Gửi ngay
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', sendPageInfo);
+  } else {
+    sendPageInfo();
+  }
+
+  // Theo dõi khi title thay đổi (SPA navigation)
+  const titleEl = document.querySelector('title');
+  if (titleEl) {
+    new MutationObserver(() => {
+      setTimeout(sendPageInfo, 500); // Đợi nội dung page cập nhật
+    }).observe(titleEl, { childList: true, characterData: true, subtree: true });
+  }
+
+  // YouTube SPA: theo dõi navigation qua yt-navigate-finish event
+  document.addEventListener('yt-navigate-finish', () => {
+    setTimeout(sendPageInfo, 1000);
   });
 
-  // ===== PHÁT HIỆN VIDEO/AUDIO ELEMENTS =====
-  
-  /**
-   * Theo dõi và báo cáo video/audio elements
-   */
+  // ===== MONITOR VIDEO/AUDIO ELEMENTS =====
+
   function monitorMediaElement(el) {
-    const reportSource = () => {
+    const report = () => {
       const src = el.src || el.currentSrc;
-      if (!src || src.startsWith('data:')) return;
-      
-      let mediaType = 'video';
-      if (el.tagName === 'AUDIO') mediaType = 'audio';
+      if (!src || src.startsWith('data:') || src.startsWith('blob:')) return;
+
+      let mediaType = el.tagName === 'AUDIO' ? 'audio' : 'video';
       if (src.includes('.m3u8')) mediaType = 'hls';
       if (src.includes('.mpd')) mediaType = 'dash';
-      
-      // Lấy thumbnail cho video
-      let thumbnail = '';
-      try {
-        const poster = el.getAttribute('poster');
-        if (poster) thumbnail = new URL(poster, location.href).href;
-      } catch {}
-      
-      // Lấy title từ context
-      const title = el.title || el.getAttribute('aria-label') || 
-                    el.closest('[aria-label]')?.getAttribute('aria-label') ||
-                    document.title;
-      
+
       chrome.runtime.sendMessage({
         type: 'MEDIA_FOUND',
         url: src,
         mediaType,
         source: 'video-element',
-        title,
-        thumbnail,
-        size: 0,
+        title: getCleanTitle(),
+        thumbnail: getPageThumbnail(),
       }).catch(() => {});
     };
-    
-    // Báo cáo ngay nếu đã có src
-    if (el.src || el.currentSrc) reportSource();
-    
-    // Theo dõi thay đổi src
-    el.addEventListener('loadstart', reportSource);
-    el.addEventListener('canplay', reportSource);
+
+    if (el.src || el.currentSrc) report();
+    el.addEventListener('loadstart', report);
+    el.addEventListener('canplay', report);
   }
-  
-  /**
-   * Scan DOM tìm video/audio elements hiện tại
-   */
-  function scanExistingElements() {
+
+  function scanAll() {
     document.querySelectorAll('video, audio').forEach(monitorMediaElement);
   }
-  
-  /**
-   * Theo dõi DOM mutations để bắt video/audio được thêm sau
-   */
-  const mediaObserver = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) {
-        if (node.nodeType !== Node.ELEMENT_NODE) continue;
-        
-        if (node.matches?.('video, audio')) {
-          monitorMediaElement(node);
-        }
-        
-        node.querySelectorAll?.('video, audio').forEach(monitorMediaElement);
-      }
-    }
-  });
-  
-  // Bắt đầu observe ngay khi DOM available
+
   if (document.body) {
-    mediaObserver.observe(document.body, { childList: true, subtree: true });
-    scanExistingElements();
+    new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node.nodeType !== 1) continue;
+          if (node.matches?.('video, audio')) monitorMediaElement(node);
+          node.querySelectorAll?.('video, audio').forEach(monitorMediaElement);
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+    scanAll();
   } else {
     document.addEventListener('DOMContentLoaded', () => {
-      mediaObserver.observe(document.body, { childList: true, subtree: true });
-      scanExistingElements();
+      new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          for (const node of m.addedNodes) {
+            if (node.nodeType !== 1) continue;
+            if (node.matches?.('video, audio')) monitorMediaElement(node);
+            node.querySelectorAll?.('video, audio').forEach(monitorMediaElement);
+          }
+        }
+      }).observe(document.body, { childList: true, subtree: true });
+      scanAll();
     });
   }
-  
-  // ===== NHẬN TIN NHẮN TỪ PAGE CONTEXT =====
-  
-  // inject.js (chạy trong page context) sẽ gửi events qua CustomEvent
+
+  // ===== NHẬN TỪ PAGE CONTEXT (inject.js) =====
   window.addEventListener('__universalDL_media', (event) => {
     const data = event.detail;
-    if (!data || !data.url) return;
-    
+    if (!data?.url) return;
     chrome.runtime.sendMessage({
       type: 'MEDIA_FOUND',
       url: data.url,
       mediaType: data.mediaType || 'video',
       source: data.source || 'page-hook',
-      title: data.title || document.title,
+      title: data.title || getCleanTitle(),
+      thumbnail: data.thumbnail || getPageThumbnail(),
       contentType: data.contentType || '',
       size: data.size || 0,
       blobData: data.blobData || null,
     }).catch(() => {});
   });
-  
+
   // ===== INJECT SCRIPT VÀO PAGE CONTEXT =====
-  
-  // inject.js cần chạy trong page context để hook fetch/XHR/blob
-  const script = document.createElement('script');
-  script.src = chrome.runtime.getURL('content/inject.js');
-  script.onload = () => script.remove();
-  (document.head || document.documentElement).appendChild(script);
-  
+  const s = document.createElement('script');
+  s.src = chrome.runtime.getURL('content/inject.js');
+  s.onload = () => s.remove();
+  (document.head || document.documentElement).appendChild(s);
+
 })();

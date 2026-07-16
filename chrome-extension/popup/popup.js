@@ -11,6 +11,7 @@ let currentFilter = 'all';
 let backendOnline = false;
 let currentPageUrl = '';
 let currentPageTitle = '';
+let currentPageThumbnail = '';
 let ytdlpChecked = false;
 let isScanningYtdlp = false;
 
@@ -48,6 +49,7 @@ async function loadMedia() {
       mediaList = resp.mediaList || [];
       currentPageTitle = resp.pageTitle || '';
       currentPageUrl = resp.pageUrl || '';
+      currentPageThumbnail = resp.pageThumbnail || '';
       ytdlpChecked = resp.ytdlpChecked || false;
 
       const el = $('pageTitle');
@@ -214,6 +216,10 @@ function createItemEl(item) {
   const sizeStr = item.size ? fmtSize(item.size) : '';
   const isYtdlp = item.source === 'ytdlp' || item.source === 'ytdlp-format';
 
+  // Thumbnail: prefer item thumbnail, then page thumbnail
+  const thumb = item.thumbnail || currentPageThumbnail || '';
+  const qualityLabel = item.qualityLabel || item.quality || '';
+
   const el = document.createElement('div');
   el.className = `media-item${isSelected ? ' selected' : ''}`;
   el.dataset.id = String(item.id);
@@ -224,13 +230,18 @@ function createItemEl(item) {
         <polyline points="2 6 5 9 10 3"/>
       </svg>
     </div>
-    <div class="item-type-icon ${ti.cls}">${ti.emoji}</div>
+    <div class="item-thumb">
+      ${thumb
+        ? `<img src="${esc(thumb)}" alt="" class="thumb-img" onerror="this.parentElement.classList.add('thumb-error')">`
+        : `<div class="thumb-placeholder">${ti.emoji}</div>`
+      }
+    </div>
     <div class="item-info">
       <div class="item-title" title="${esc(title)}">${esc(title)}</div>
       <div class="item-url" title="${esc(item.url)}">${esc(shortUrl)}</div>
       <div class="item-meta">
         <span class="badge ${ti.badge}">${ti.label}</span>
-        ${item.quality ? `<span class="badge badge-quality">${esc(item.quality)}</span>` : ''}
+        ${qualityLabel ? `<span class="badge badge-quality">${esc(qualityLabel)}</span>` : ''}
         ${sizeStr ? `<span class="badge badge-size">${sizeStr}</span>` : ''}
         ${isYtdlp ? `<span class="badge badge-ytdlp">yt-dlp</span>` : ''}
       </div>
