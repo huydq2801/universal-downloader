@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"universal-downloader/internal/downloader"
@@ -130,7 +133,84 @@ func (a *App) GetInfo(url string) (*downloader.MediaInfo, error) {
 	return engine.GetInfo(url)
 }
 
-// AnalyzeWithAI cào trang web và dùng Gemini AI để trích xuất link video ẩn
+// fetchHTML tải mã nguồn HTML của một URL với headers giả lập trình duyệt
+func (a *App) fetchHTML(ctx context.Context, targetURL, referer string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("tạo request thất bại cho %s: %v", targetURL, err)
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "vi-VN,vi;q=0.9,en-VN;q=0.8,en-US;q=0.7,en;q=0.6")
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	}
+
+	client := &http.Client{Timeout: 12 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("kết nối URL thất bại %s: %v", targetURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("không thể tải URL %s (HTTP %d)", targetURL, resp.StatusCode)
+	}
+
+	bytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("đọc dữ liệu thất bại từ %s: %v", targetURL, err)
+	}
+
+	return string(bytes), nil
+}
+
+// extractIframeURLs tìm các link iframe nhúng và các link máy chủ video tiềm năng trong HTML
+func (a *App) extractIframeURLs(htmlContent, baseURL string) []string {
+	var urls []string
+	
+	// 1. Quét thẻ iframe src
+	iframeRe := regexp.MustCompile(`(?i)<iframe[^>]+src=["']([^"']+)["']`)
+	matches := iframeRe.FindAllStringSubmatch(htmlContent, -1)
+	
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return urls
+	}
+	
+	seen := make(map[string]bool)
+	for _, m := range matches {
+		if len(m) > 1 {
+			uStr := strings.TrimSpace(m[1])
+			if uStr == "" || strings.HasPrefix(uStr, "javascript:") {
+				continue
+			}
+			u, err := url.Parse(uStr)
+			if err == nil {
+				absURL := base.ResolveReference(u).String()
+				if !seen[absURL] {
+					seen[absURL] = true
+					urls = append(urls, absURL)
+				}
+			}
+		}
+	}
+	
+	// 2. Quét các link hosting video trực tiếp (doodstream, streamtape, mixdrop, fembed, voe, vidsrc, v.v.)
+	playerRe := regexp.MustCompile(`(?i)https?://[^\s"'<>]+?(?:dood|streamtape|mixdrop|fembed|voe|vidsrc|embed|player|video|play)[^\s"'<>]*`)
+	playerMatches := playerRe.FindAllString(htmlContent, -1)
+	for _, uStr := range playerMatches {
+		if !seen[uStr] {
+			seen[uStr] = true
+			urls = append(urls, uStr)
+		}
+	}
+	
+	return urls
+}
+
+// AnalyzeWithAI cào trang web chính, quét các iframe nhúng bên dưới và dùng Gemini AI để trích xuất link video ẩn
 func (a *App) AnalyzeWithAI(pageURL string) (*downloader.ExtractResult, error) {
 	// 1. Lấy API Key từ Settings
 	settings, err := a.db.GetSettings()
@@ -138,35 +218,52 @@ func (a *App) AnalyzeWithAI(pageURL string) (*downloader.ExtractResult, error) {
 		return nil, fmt.Errorf("Hãy thiết lập Gemini API Key trong Cài đặt trước khi dùng AI")
 	}
 
-	// 2. Tải HTML nguồn của trang web
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	// 2. Tải HTML trang web chính
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
+	runtime.LogInfof(a.ctx, "AI Extractor: Đang tải trang web gốc: %s", pageURL)
+	mainHTML, err := a.fetchHTML(ctx, pageURL, "")
 	if err != nil {
-		return nil, fmt.Errorf("tạo request tải HTML thất bại: %v", err)
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("không thể tải mã nguồn trang web: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("tải trang web thất bại, mã HTTP: %d", resp.StatusCode)
+		return nil, fmt.Errorf("Lỗi tải trang gốc: %v", err)
 	}
 
-	htmlBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("đọc mã nguồn trang web lỗi: %v", err)
-	}
-	htmlContent := string(htmlBytes)
+	// Trích xuất các iframe/player URLs liên quan
+	iframeURLs := a.extractIframeURLs(mainHTML, pageURL)
+	
+	// Gộp HTML chính và HTML của iframe để AI phân tích toàn diện
+	var combinedHTML strings.Builder
+	combinedHTML.WriteString(fmt.Sprintf("--- ORIGINAL PAGE URL: %s ---\n", pageURL))
+	combinedHTML.WriteString(mainHTML)
+	combinedHTML.WriteString("\n\n")
 
-	// 3. Dùng Gemini AI trích xuất link video từ HTML
-	return downloader.ExtractMediaWithGemini(ctx, pageURL, htmlContent, settings.GeminiAPIKey, settings.GeminiModel)
+	// Quét sâu thêm tối đa 3 iframe/player nhúng để tìm link stream thực tế
+	iframeCount := 0
+	for _, iframeURL := range iframeURLs {
+		if iframeCount >= 3 {
+			break
+		}
+		// Bỏ qua các URL quảng cáo/analytics không cần thiết
+		if strings.Contains(iframeURL, "google") || strings.Contains(iframeURL, "doubleclick") || 
+		   strings.Contains(iframeURL, "facebook") || strings.Contains(iframeURL, "analytics") || 
+		   strings.Contains(iframeURL, "adnxs") || strings.Contains(iframeURL, "banner") {
+			continue
+		}
+		
+		runtime.LogInfof(a.ctx, "AI Extractor: Đang quét sâu vào link nhúng: %s", iframeURL)
+		iframeHTML, err := a.fetchHTML(ctx, iframeURL, pageURL)
+		if err == nil {
+			combinedHTML.WriteString(fmt.Sprintf("--- EMBEDDED PLAYER/IFRAME URL: %s ---\n", iframeURL))
+			combinedHTML.WriteString(iframeHTML)
+			combinedHTML.WriteString("\n\n")
+			iframeCount++
+		}
+	}
+
+	runtime.LogInfof(a.ctx, "AI Extractor: Đang gửi dữ liệu HTML tổng hợp (chứa %d links nhúng) lên Gemini...", iframeCount)
+
+	// 3. Dùng Gemini AI trích xuất link video từ toàn bộ HTML tổng hợp này
+	return downloader.ExtractMediaWithGemini(ctx, pageURL, combinedHTML.String(), settings.GeminiAPIKey, settings.GeminiModel)
 }
 
 
