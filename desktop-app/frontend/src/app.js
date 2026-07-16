@@ -157,15 +157,15 @@ function createDownloadCard(item) {
       </div>
       <div class="dl-actions">
         ${isCompleted ? `
-          <button class="action-btn" onclick="openFolder('${esc(item.savePath || '')}')">📁</button>
+          <button class="action-btn btn-open-folder" title="Mở thư mục">📁</button>
         ` : ''}
         ${isFailed ? `
-          <button class="action-btn" onclick="retryDownload('${item.id}')" title="Thử lại">🔄</button>
+          <button class="action-btn btn-retry" title="Thử lại">🔄</button>
         ` : ''}
         ${isActive ? `
-          <button class="action-btn danger" onclick="cancelDownload('${item.id}')" title="Hủy">⏹</button>
+          <button class="action-btn danger btn-cancel" title="Hủy">⏹</button>
         ` : `
-          <button class="action-btn danger" onclick="removeDownload('${item.id}')" title="Xóa">🗑</button>
+          <button class="action-btn danger btn-remove" title="Xóa">🗑</button>
         `}
       </div>
     </div>
@@ -193,6 +193,24 @@ function createDownloadCard(item) {
       <div style="font-size:11px;color:var(--success);margin-top:6px">✅ Đã tải xong • ${esc(item.savePath || 'Xem thư mục tải')}</div>
     ` : ''}
   `;
+
+  // Gán sự kiện trực tiếp để tránh lỗi thoát chuỗi đường dẫn (Windows Backslash escape error)
+  card.querySelector('.btn-open-folder')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openFolder(item.savePath);
+  });
+  card.querySelector('.btn-retry')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    retryDownload(item.id);
+  });
+  card.querySelector('.btn-cancel')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    cancelDownload(item.id);
+  });
+  card.querySelector('.btn-remove')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    removeDownload(item.id);
+  });
   
   return card;
 }
@@ -286,7 +304,6 @@ function renderHistory() {
   }
   
   for (const record of historyItems) {
-    // Tương tự createDownloadCard nhưng cho history records
     const card = document.createElement('div');
     card.className = `dl-card status-${record.status}`;
     const typeEmoji = { video: '🎬', hls: '📡', dash: '📡', audio: '🎵' }[record.type] || '🎬';
@@ -305,10 +322,16 @@ function renderHistory() {
           </div>
         </div>
         <div class="dl-actions">
-          ${record.status === 'completed' ? `<button class="action-btn" onclick="openFolder('${esc(record.savePath || '')}')">📁</button>` : ''}
+          ${record.status === 'completed' ? `<button class="action-btn btn-open-folder" title="Mở thư mục">📁</button>` : ''}
         </div>
       </div>
     `;
+
+    card.querySelector('.btn-open-folder')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openFolder(record.savePath);
+    });
+
     listEl.appendChild(card);
   }
 }
