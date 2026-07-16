@@ -495,8 +495,8 @@ html, body {
 /* ===== Settings ===== */
 .settings-grid {
   flex: 1;
-  min-height: 0;
-  overflow-y: auto;
+  max-height: calc(100vh - 90px) !important;
+  overflow-y: auto !important;
   padding: 20px 28px;
   display: flex;
   flex-direction: column;
