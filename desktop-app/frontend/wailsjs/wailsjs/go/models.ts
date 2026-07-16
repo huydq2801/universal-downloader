@@ -8,7 +8,7 @@ export namespace downloader {
 	    quality: string;
 	    format: string;
 	    savePath: string;
-	    headers: {[key: string]: string};
+	    headers: Record<string, string>;
 	    cookies: string;
 	    blobData: string;
 	

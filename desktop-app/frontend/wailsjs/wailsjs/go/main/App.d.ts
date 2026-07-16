@@ -8,7 +8,7 @@ export function AddDownload(arg1:downloader.DownloadRequest):Promise<queue.Item>
 
 export function CancelDownload(arg1:string):Promise<void>;
 
-export function CheckTools():Promise<{[key: string]: boolean}>;
+export function CheckTools():Promise<Record<string, boolean>>;
 
 export function GetDownloadList():Promise<Array<storage.DownloadRecord>>;
 
