@@ -47,6 +47,8 @@ type Settings struct {
 	FfmpegPath     string `json:"ffmpegPath"`
 	AutoOpenFolder bool   `json:"autoOpenFolder"`
 	Theme          string `json:"theme"`
+	GeminiAPIKey   string `json:"geminiAPIKey"`
+	GeminiModel    string `json:"geminiModel"`
 }
 
 // NewDatabase khởi tạo SQLite database

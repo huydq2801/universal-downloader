@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"universal-downloader/internal/downloader"
 	"universal-downloader/internal/queue"
@@ -126,6 +129,46 @@ func (a *App) GetInfo(url string) (*downloader.MediaInfo, error) {
 	}
 	return engine.GetInfo(url)
 }
+
+// AnalyzeWithAI cào trang web và dùng Gemini AI để trích xuất link video ẩn
+func (a *App) AnalyzeWithAI(pageURL string) (*downloader.ExtractResult, error) {
+	// 1. Lấy API Key từ Settings
+	settings, err := a.db.GetSettings()
+	if err != nil || settings.GeminiAPIKey == "" {
+		return nil, fmt.Errorf("Hãy thiết lập Gemini API Key trong Cài đặt trước khi dùng AI")
+	}
+
+	// 2. Tải HTML nguồn của trang web
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", pageURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("tạo request tải HTML thất bại: %v", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("không thể tải mã nguồn trang web: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("tải trang web thất bại, mã HTTP: %d", resp.StatusCode)
+	}
+
+	htmlBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("đọc mã nguồn trang web lỗi: %v", err)
+	}
+	htmlContent := string(htmlBytes)
+
+	// 3. Dùng Gemini AI trích xuất link video từ HTML
+	return downloader.ExtractMediaWithGemini(ctx, pageURL, htmlContent, settings.GeminiAPIKey, settings.GeminiModel)
+}
+
 
 // CheckTools kiểm tra yt-dlp và ffmpeg có sẵn không
 func (a *App) CheckTools() map[string]bool {

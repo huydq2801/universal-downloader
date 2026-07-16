@@ -6,6 +6,8 @@ import {storage} from '../models';
 
 export function AddDownload(arg1:downloader.DownloadRequest):Promise<queue.Item>;
 
+export function AnalyzeWithAI(arg1:string):Promise<downloader.ExtractResult>;
+
 export function CancelDownload(arg1:string):Promise<void>;
 
 export function CheckTools():Promise<Record<string, boolean>>;

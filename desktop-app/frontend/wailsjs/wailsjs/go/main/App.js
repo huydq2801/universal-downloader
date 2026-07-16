@@ -6,6 +6,10 @@ export function AddDownload(arg1) {
   return window['go']['main']['App']['AddDownload'](arg1);
 }
 
+export function AnalyzeWithAI(arg1) {
+  return window['go']['main']['App']['AnalyzeWithAI'](arg1);
+}
+
 export function CancelDownload(arg1) {
   return window['go']['main']['App']['CancelDownload'](arg1);
 }

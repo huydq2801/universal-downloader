@@ -782,6 +782,24 @@ code {
   box-shadow: 0 6px 24px rgba(108,99,255,0.4);
 }
 
+.url-ai-btn {
+  padding: 12px 22px;
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #7F00FF 0%, #E100FF 100%) !important;
+  color: white !important;
+  border-color: #B800FF !important;
+  box-shadow: 0 4px 20px rgba(184, 0, 255, 0.25);
+}
+
+.url-ai-btn:hover {
+  opacity: 0.95;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px rgba(184, 0, 255, 0.45);
+}
+
+
 .url-options-row {
   display: flex;
   align-items: center;

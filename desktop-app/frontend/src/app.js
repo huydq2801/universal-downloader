@@ -364,6 +364,8 @@ async function loadSettings() {
   document.getElementById('maxConcurrent').value = settings.maxConcurrent || 3;
   document.getElementById('ytdlpPath').value = settings.ytdlpPath || '';
   document.getElementById('ffmpegPath').value = settings.ffmpegPath || '';
+  document.getElementById('geminiAPIKey').value = settings.geminiAPIKey || '';
+  document.getElementById('geminiModel').value = settings.geminiModel || 'gemini-3.1-flash-lite';
 }
 
 document.getElementById('saveSettingsBtn')?.addEventListener('click', async () => {
@@ -374,6 +376,8 @@ document.getElementById('saveSettingsBtn')?.addEventListener('click', async () =
     maxConcurrent: parseInt(document.getElementById('maxConcurrent').value) || 3,
     ytdlpPath: document.getElementById('ytdlpPath').value,
     ffmpegPath: document.getElementById('ffmpegPath').value,
+    geminiAPIKey: document.getElementById('geminiAPIKey').value.trim(),
+    geminiModel: document.getElementById('geminiModel').value,
   };
   
   try {
@@ -441,10 +445,9 @@ function setupUrlDownloader() {
     document.getElementById('analysisArea').style.display = 'none';
   });
 
-  // Nút Phân tích / Tải xuống chính
+  // Nút Phân tích / Tải xuống chính (Phân tích thường)
   const quickDownloadBtn = document.getElementById('quickDownloadBtn');
   if (quickDownloadBtn) {
-    // Đổi tên nút thành Phân tích
     quickDownloadBtn.innerHTML = `
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <circle cx="11" cy="11" r="8"/>
@@ -464,7 +467,6 @@ function setupUrlDownloader() {
       quickDownloadBtn.disabled = true;
       quickDownloadBtn.innerHTML = `<span class="spinner"></span> Đang quét...`;
       
-      // Hiện khung phân tích với trạng thái đang tải
       const area = document.getElementById('analysisArea');
       area.style.display = 'block';
       document.getElementById('analysisTitle').textContent = 'Đang phân tích liên kết...';
@@ -476,7 +478,6 @@ function setupUrlDownloader() {
       try {
         const info = await window.go.main.App.GetInfo(url);
         if (!info) throw new Error('Không nhận được thông tin video.');
-        
         renderAnalysisResult(url, info);
       } catch (err) {
         showToast(`❌ Phân tích thất bại: ${err.message || err}`, 'error');
@@ -494,6 +495,50 @@ function setupUrlDownloader() {
     });
   }
 
+  // Nút ✨ Trích xuất AI (Gemini)
+  const aiExtractBtn = document.getElementById('aiExtractBtn');
+  if (aiExtractBtn) {
+    aiExtractBtn.addEventListener('click', async () => {
+      const urlInput = document.getElementById('mainUrlInput');
+      const url = urlInput ? urlInput.value.trim() : '';
+      if (!url) {
+        showToast('Vui lòng nhập hoặc dán URL trang web cần dùng AI phân tích!', 'error');
+        return;
+      }
+
+      // Kiểm tra API Key có được lưu chưa
+      if (!settings || !settings.geminiAPIKey) {
+        showToast('⚠️ Vui lòng cấu hình Gemini API Key trong Cài đặt trước!', 'error');
+        navigateTo('settings');
+        document.getElementById('geminiAPIKey')?.focus();
+        return;
+      }
+
+      aiExtractBtn.disabled = true;
+      aiExtractBtn.innerHTML = `<span class="spinner"></span> Đang quét bằng AI...`;
+      
+      const area = document.getElementById('analysisArea');
+      area.style.display = 'block';
+      document.getElementById('analysisTitle').textContent = 'Gemini AI đang tìm liên kết video ẩn...';
+      document.getElementById('analysisDomain').textContent = shortenUrl(url);
+      document.getElementById('analysisThumb').src = '';
+      document.getElementById('analysisDuration').textContent = '--:--';
+      document.getElementById('formatsList').innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted)"><span class="spinner"></span> Gemini AI đang đọc mã nguồn HTML và trích xuất các luồng stream video ẩn...</div>';
+
+      try {
+        const aiResult = await window.go.main.App.AnalyzeWithAI(url);
+        if (!aiResult) throw new Error('AI không tìm thấy video nào.');
+        renderAIAnalysisResult(url, aiResult);
+      } catch (err) {
+        showToast(`❌ AI trích xuất thất bại: ${err.message || err}`, 'error');
+        document.getElementById('formatsList').innerHTML = `<div style="padding: 20px; text-align: center; color: var(--error)">❌ AI không thể trích xuất video từ trang này.<br><small>${esc(err.message || err)}</small></div>`;
+      } finally {
+        aiExtractBtn.disabled = false;
+        aiExtractBtn.innerHTML = `✨ Trích xuất AI`;
+      }
+    });
+  }
+
   // Phím Enter trong ô nhập
   const mainUrlInput = document.getElementById('mainUrlInput');
   if (mainUrlInput) {
@@ -504,6 +549,64 @@ function setupUrlDownloader() {
     });
   }
 }
+
+// ===== RENDER KẾT QUẢ PHÂN TÍCH AI =====
+function renderAIAnalysisResult(originalUrl, aiResult) {
+  document.getElementById('analysisTitle').textContent = aiResult.title || 'Video trích xuất bằng AI';
+  
+  let domain = 'Website';
+  try {
+    domain = new URL(originalUrl).hostname.replace('www.', '');
+  } catch {}
+  document.getElementById('analysisDomain').textContent = domain + " (AI Extracted)";
+
+  const thumbEl = document.getElementById('analysisThumb');
+  if (aiResult.thumbnail) {
+    thumbEl.src = aiResult.thumbnail;
+    thumbEl.style.display = 'block';
+  } else {
+    thumbEl.style.display = 'none';
+  }
+
+  document.getElementById('analysisDuration').style.display = 'none'; // AI may not know exact duration
+
+  const formatsList = document.getElementById('formatsList');
+  formatsList.innerHTML = '';
+
+  if (!aiResult.formats || aiResult.formats.length === 0) {
+    formatsList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--warning)">⚠️ AI không tìm thấy link video trực tiếp nào khả dụng trên trang này.</div>';
+    return;
+  }
+
+  for (const fmt of aiResult.formats) {
+    const itemEl = document.createElement('div');
+    itemEl.className = 'format-item';
+
+    const isVideo = fmt.ext !== 'mp3' && fmt.ext !== 'm4a';
+    const typeIcon = isVideo ? '🎬' : '🎵';
+    const labelText = `${fmt.title || 'Đường dẫn video'} (${fmt.ext || 'mp4'})`;
+    const descText = `Chất lượng: ${fmt.quality || 'Tự động'} • Trích xuất bởi Gemini`;
+
+    itemEl.innerHTML = `
+      <div class="format-info-col">
+        <span class="format-icon">${typeIcon}</span>
+        <div class="format-desc">
+          <strong>${esc(labelText)}</strong>
+          <span>${esc(descText)}</span>
+          <span style="font-size: 10px; color: var(--accent2); word-break: break-all;">${esc(shortenUrl(fmt.URL))}</span>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-sm btn-dl-format">Tải về</button>
+    `;
+
+    itemEl.querySelector('.btn-dl-format').addEventListener('click', () => {
+      downloadSelectedFormat(originalUrl, aiResult.title || fmt.title, fmt.URL, fmt.ext);
+    });
+
+    formatsList.appendChild(itemEl);
+  }
+}
+
 
 // ===== RENDER KẾT QUẢ PHÂN TÍCH =====
 function renderAnalysisResult(originalUrl, info) {

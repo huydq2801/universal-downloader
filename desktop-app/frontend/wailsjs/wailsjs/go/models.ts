@@ -1,5 +1,23 @@
 export namespace downloader {
 	
+	export class AIFormatInfo {
+	    title: string;
+	    url: string;
+	    quality: string;
+	    ext: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AIFormatInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.url = source["url"];
+	        this.quality = source["quality"];
+	        this.ext = source["ext"];
+	    }
+	}
 	export class DownloadRequest {
 	    url: string;
 	    pageUrl: string;
@@ -29,6 +47,40 @@ export namespace downloader {
 	        this.cookies = source["cookies"];
 	        this.blobData = source["blobData"];
 	    }
+	}
+	export class ExtractResult {
+	    title: string;
+	    thumbnail: string;
+	    formats: AIFormatInfo[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ExtractResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.thumbnail = source["thumbnail"];
+	        this.formats = this.convertValues(source["formats"], AIFormatInfo);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class FormatInfo {
 	    format_id: string;
@@ -241,6 +293,8 @@ export namespace storage {
 	    ffmpegPath: string;
 	    autoOpenFolder: boolean;
 	    theme: string;
+	    geminiAPIKey: string;
+	    geminiModel: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -256,6 +310,8 @@ export namespace storage {
 	        this.ffmpegPath = source["ffmpegPath"];
 	        this.autoOpenFolder = source["autoOpenFolder"];
 	        this.theme = source["theme"];
+	        this.geminiAPIKey = source["geminiAPIKey"];
+	        this.geminiModel = source["geminiModel"];
 	    }
 	}
 
