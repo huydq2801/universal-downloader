@@ -71,6 +71,21 @@ func NewEngine(toolsDir string) *Engine {
 	return e
 }
 
+// ToolsDir trả về thư mục công cụ
+func (e *Engine) ToolsDir() string {
+	return e.toolsDir
+}
+
+// SetPaths thiết lập đường dẫn tùy chỉnh cho yt-dlp và ffmpeg
+func (e *Engine) SetPaths(ytdlp, ffmpeg string) {
+	if ytdlp != "" && ytdlp != "yt-dlp" {
+		e.ytdlp = ytdlp
+	}
+	if ffmpeg != "" && ffmpeg != "ffmpeg" {
+		e.ffmpeg = ffmpeg
+	}
+}
+
 // findTool tìm executable tool
 func (e *Engine) findTool(name string) string {
 	// Tìm trong tools dir trước

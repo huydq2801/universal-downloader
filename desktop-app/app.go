@@ -131,12 +131,18 @@ func (a *App) SelectFolder() (string, error) {
 // GetInfo lấy thông tin media từ URL (dùng yt-dlp --dump-json)
 func (a *App) GetInfo(url string) (*downloader.MediaInfo, error) {
 	engine := downloader.NewEngine(getToolsDir())
+	if settings, err := a.db.GetSettings(); err == nil {
+		engine.SetPaths(settings.YtdlpPath, settings.FfmpegPath)
+	}
 	return engine.GetInfo(url)
 }
 
 // CheckTools kiểm tra yt-dlp và ffmpeg có sẵn không
 func (a *App) CheckTools() map[string]bool {
 	engine := downloader.NewEngine(getToolsDir())
+	if settings, err := a.db.GetSettings(); err == nil {
+		engine.SetPaths(settings.YtdlpPath, settings.FfmpegPath)
+	}
 	return engine.CheckTools()
 }
 

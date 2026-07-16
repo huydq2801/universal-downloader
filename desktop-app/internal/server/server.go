@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -216,14 +218,21 @@ func (s *Server) handleGetInfo(c *gin.Context) {
 		return
 	}
 
+	// Lấy custom paths từ settings
 	settings, _ := s.db.GetSettings()
-	ytdlpPath := "yt-dlp"
-	if settings != nil && settings.YtdlpPath != "" {
+	var ytdlpPath, ffmpegPath string
+	if settings != nil {
 		ytdlpPath = settings.YtdlpPath
+		ffmpegPath = settings.FfmpegPath
 	}
 
-	engine := &downloader.Engine{}
-	_ = ytdlpPath
+	// Xác định tools directory từ exe path
+	exe, _ := os.Executable()
+	toolsDir := filepath.Dir(exe)
+
+	// Tạo engine mới
+	engine := downloader.NewEngine(toolsDir)
+	engine.SetPaths(ytdlpPath, ffmpegPath)
 
 	info, err := engine.GetInfo(body.URL)
 	if err != nil {

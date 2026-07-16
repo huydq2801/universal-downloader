@@ -249,17 +249,24 @@ func (m *Manager) processDownload(id string) {
 	m.db.UpdateStatus(id, string(StatusDownloading), 0, "", "", "")
 	m.notify(item)
 
-	// Xác định save path
+	// Xác định save path và custom paths cho công cụ
 	savePath := item.SavePath
-	if savePath == "" {
-		settings, _ := m.db.GetSettings()
-		if settings != nil {
+	var ytdlpPath, ffmpegPath string
+	settings, _ := m.db.GetSettings()
+	if settings != nil {
+		if savePath == "" {
 			savePath = settings.SaveDirectory
 		}
+		ytdlpPath = settings.YtdlpPath
+		ffmpegPath = settings.FfmpegPath
 	}
 
+	// Tạo engine riêng cho luồng tải này để tránh race condition và áp dụng custom paths
+	engine := downloader.NewEngine(m.engine.ToolsDir())
+	engine.SetPaths(ytdlpPath, ffmpegPath)
+
 	// Bắt đầu download
-	err := m.engine.Download(ctx, item.Request, savePath, func(progress float64, speed, eta, status string) {
+	err := engine.Download(ctx, item.Request, savePath, func(progress float64, speed, eta, status string) {
 		m.mu.Lock()
 		item.Progress = progress
 		item.Speed = speed
