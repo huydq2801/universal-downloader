@@ -58,7 +58,6 @@
         </a>
       </div>
 
-      <!-- Status Footer -->
       <div class="sidebar-footer">
         <div class="tools-status" id="toolsStatus">
           <div class="tool-check" id="ytdlpCheck">
@@ -75,21 +74,77 @@
 
     <!-- Main Content -->
     <main class="main-content">
-      <!-- Queue Page -->
+
+      <!-- ===== QUEUE PAGE ===== -->
       <div class="page active" id="page-queue">
-        <div class="page-header">
-          <div>
-            <h1 class="page-title">Hàng đợi tải</h1>
-            <p class="page-subtitle">Quản lý và theo dõi tiến trình tải xuống</p>
-          </div>
-          <div class="page-actions">
-            <button class="btn btn-ghost" id="clearCompletedBtn">Xóa đã xong</button>
-            <button class="btn btn-primary" id="addUrlBtn">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
-              Thêm URL
-            </button>
+
+        <!-- URL Input Hero - luôn hiện ở trên cùng -->
+        <div class="url-hero">
+          <div class="url-hero-inner">
+            <div class="url-input-row">
+              <div class="url-input-wrap">
+                <svg class="url-input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                </svg>
+                <input
+                  type="url"
+                  id="mainUrlInput"
+                  class="url-main-input"
+                  placeholder="Dán link vào đây: YouTube, TikTok, Instagram, Facebook, Twitter, Vimeo, hoặc link .mp4 trực tiếp..."
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <button class="url-paste-btn" id="pasteBtn" title="Dán từ clipboard">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                </button>
+              </div>
+              <button class="btn btn-primary url-dl-btn" id="quickDownloadBtn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Tải xuống
+              </button>
+            </div>
+
+            <!-- Options row -->
+            <div class="url-options-row">
+              <div class="url-option-group">
+                <label class="url-option-label">Chất lượng</label>
+                <select id="quickQuality" class="select select-sm">
+                  <option value="best">Tốt nhất</option>
+                  <option value="1080">1080p</option>
+                  <option value="720">720p</option>
+                  <option value="480">480p</option>
+                  <option value="360">360p</option>
+                  <option value="audio">Chỉ âm thanh (MP3)</option>
+                </select>
+              </div>
+              <div class="url-option-group">
+                <label class="url-option-label">Format</label>
+                <select id="quickFormat" class="select select-sm">
+                  <option value="mp4">MP4</option>
+                  <option value="webm">WebM</option>
+                  <option value="mkv">MKV</option>
+                  <option value="mp3">MP3</option>
+                </select>
+              </div>
+              <div class="url-supported-sites">
+                <span class="supported-label">Hỗ trợ:</span>
+                <span class="site-tag">YouTube</span>
+                <span class="site-tag">TikTok</span>
+                <span class="site-tag">Instagram</span>
+                <span class="site-tag">Facebook</span>
+                <span class="site-tag">Twitter/X</span>
+                <span class="site-tag">Vimeo</span>
+                <span class="site-tag">+20 trang khác</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -98,8 +153,7 @@
           <div class="stat-card">
             <div class="stat-icon stat-blue">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
-                <polyline points="17 6 23 6 23 12"/>
+                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
               </svg>
             </div>
             <div class="stat-info">
@@ -110,8 +164,7 @@
           <div class="stat-card">
             <div class="stat-icon stat-yellow">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/>
-                <polyline points="12 6 12 12 16 14"/>
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
               </svg>
             </div>
             <div class="stat-info">
@@ -134,14 +187,16 @@
             <div class="stat-icon stat-red">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="10"/>
-                <line x1="15" y1="9" x2="9" y2="15"/>
-                <line x1="9" y1="9" x2="15" y2="15"/>
+                <line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
               </svg>
             </div>
             <div class="stat-info">
               <div class="stat-value" id="statFailed">0</div>
               <div class="stat-label">Thất bại</div>
             </div>
+          </div>
+          <div class="stat-card-action">
+            <button class="btn btn-ghost btn-sm" id="clearCompletedBtn">Xóa đã xong</button>
           </div>
         </div>
 
@@ -156,12 +211,12 @@
               </svg>
             </div>
             <h3>Chưa có gì để tải</h3>
-            <p>Mở trang web có video, click biểu tượng extension trên Chrome<br>và chọn video bạn muốn tải.</p>
+            <p>Dán link vào ô trên và bấm <strong>Tải xuống</strong></p>
           </div>
         </div>
       </div>
 
-      <!-- History Page -->
+      <!-- ===== HISTORY PAGE ===== -->
       <div class="page" id="page-history">
         <div class="page-header">
           <div>
@@ -174,8 +229,7 @@
           <div class="empty-state">
             <div class="empty-illustration">
               <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
-                <circle cx="12" cy="12" r="10"/>
-                <polyline points="12 6 12 12 16 14"/>
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
               </svg>
             </div>
             <h3>Chưa có lịch sử</h3>
@@ -184,7 +238,7 @@
         </div>
       </div>
 
-      <!-- Settings Page -->
+      <!-- ===== SETTINGS PAGE ===== -->
       <div class="page" id="page-settings">
         <div class="page-header">
           <div>
@@ -274,86 +328,22 @@
             </div>
             <div class="setting-row">
               <div class="setting-info">
-                <label class="setting-label">Tải công cụ tự động</label>
-                <span class="setting-desc">Nếu chưa có yt-dlp/ffmpeg</span>
+                <label class="setting-label">Tải công cụ</label>
+                <span class="setting-desc">Nếu chưa có yt-dlp hoặc ffmpeg</span>
               </div>
-              <a href="https://github.com/yt-dlp/yt-dlp/releases/latest" target="_blank" class="btn btn-ghost btn-sm">
-                Tải yt-dlp ↗
-              </a>
-            </div>
-          </div>
-
-          <div class="settings-section">
-            <h2 class="section-title">🔌 Chrome Extension</h2>
-            <div class="extension-guide">
-              <div class="guide-step">
-                <span class="step-num">1</span>
-                <span>Mở Chrome → <code>chrome://extensions/</code></span>
-              </div>
-              <div class="guide-step">
-                <span class="step-num">2</span>
-                <span>Bật <strong>Developer mode</strong> (góc phải)</span>
-              </div>
-              <div class="guide-step">
-                <span class="step-num">3</span>
-                <span>Click <strong>Load unpacked</strong></span>
-              </div>
-              <div class="guide-step">
-                <span class="step-num">4</span>
-                <span>Chọn thư mục <code>chrome-extension/</code></span>
+              <div style="display:flex;gap:8px">
+                <a href="https://github.com/yt-dlp/yt-dlp/releases/latest" target="_blank" class="btn btn-ghost btn-sm">
+                  Tải yt-dlp ↗
+                </a>
+                <a href="https://ffmpeg.org/download.html" target="_blank" class="btn btn-ghost btn-sm">
+                  Tải ffmpeg ↗
+                </a>
               </div>
             </div>
           </div>
         </div>
       </div>
     </main>
-  </div>
-
-  <!-- Add URL Modal -->
-  <div class="modal-overlay" id="addUrlModal" style="display:none">
-    <div class="modal">
-      <div class="modal-header">
-        <h3>Thêm URL tải xuống</h3>
-        <button class="icon-btn" id="closeModalBtn">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label class="form-label">URL Video / Trang web</label>
-          <input type="url" id="urlInput" class="input" placeholder="https://youtube.com/watch?v=...">
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Chất lượng</label>
-            <select id="modalQuality" class="select">
-              <option value="best">Tốt nhất</option>
-              <option value="1080">1080p</option>
-              <option value="720">720p</option>
-              <option value="480">480p</option>
-              <option value="audio">Chỉ âm thanh</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Format</label>
-            <select id="modalFormat" class="select">
-              <option value="mp4">MP4</option>
-              <option value="webm">WebM</option>
-              <option value="mkv">MKV</option>
-            </select>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" id="cancelModalBtn">Hủy</button>
-        <button class="btn btn-primary" id="confirmDownloadBtn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7 10 12 15 17 10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
-          Tải xuống
-        </button>
-      </div>
-    </div>
   </div>
 
   <!-- Wails runtime -->

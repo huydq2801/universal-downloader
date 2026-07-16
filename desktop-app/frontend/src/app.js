@@ -16,7 +16,7 @@ let wsConnection = null;
 // ===== INIT =====
 document.addEventListener('DOMContentLoaded', async () => {
   setupNavigation();
-  setupModals();
+  setupUrlDownloader();
   await loadInitialData();
   connectWebSocket();
   setupWailsEvents();
@@ -395,59 +395,85 @@ function updateToolStatus(checkId, ok, statusId) {
   if (statusEl) statusEl.textContent = ok ? '✅' : '❌';
 }
 
-// ===== ADD URL MODAL =====
-function setupModals() {
-  document.getElementById('addUrlBtn')?.addEventListener('click', () => {
-    document.getElementById('addUrlModal').style.display = 'flex';
-    document.getElementById('urlInput')?.focus();
-  });
-  
-  const closeModal = () => {
-    document.getElementById('addUrlModal').style.display = 'none';
-    document.getElementById('urlInput').value = '';
-  };
-  
-  document.getElementById('closeModalBtn')?.addEventListener('click', closeModal);
-  document.getElementById('cancelModalBtn')?.addEventListener('click', closeModal);
-  
-  document.getElementById('addUrlModal')?.addEventListener('click', (e) => {
-    if (e.target === e.currentTarget) closeModal();
-  });
-  
-  document.getElementById('confirmDownloadBtn')?.addEventListener('click', async () => {
-    const url = document.getElementById('urlInput').value.trim();
-    if (!url) { showToast('Vui lòng nhập URL', 'error'); return; }
-    
-    const req = {
-      url,
-      quality: document.getElementById('modalQuality').value,
-      format: document.getElementById('modalFormat').value,
-      type: 'video',
-      title: '',
-      pageUrl: '',
-    };
-    
-    try {
-      await window.go.main.App.AddDownload(req);
-      showToast('✅ Đã thêm vào hàng đợi', 'success');
-    } catch {
-      await fetch('http://localhost:7890/api/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req),
-      });
-      showToast('✅ Đã thêm vào hàng đợi', 'success');
-    }
-    
-    closeModal();
-    navigateTo('queue');
-    refreshQueue();
-  });
-  
-  // Enter key trong URL input
-  document.getElementById('urlInput')?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') document.getElementById('confirmDownloadBtn').click();
-  });
+// ===== SETUP DIRECT URL DOWNLOADER =====
+function setupUrlDownloader() {
+  // Nút dán từ Clipboard
+  const pasteBtn = document.getElementById('pasteBtn');
+  if (pasteBtn) {
+    pasteBtn.addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        const input = document.getElementById('mainUrlInput');
+        if (input && text) {
+          input.value = text.trim();
+        }
+      } catch (err) {
+        showToast('Không thể đọc Clipboard. Hãy dán thủ công.', 'error');
+      }
+    });
+  }
+
+  // Nút Tải xuống nhanh
+  const quickDownloadBtn = document.getElementById('quickDownloadBtn');
+  if (quickDownloadBtn) {
+    quickDownloadBtn.addEventListener('click', async () => {
+      const urlInput = document.getElementById('mainUrlInput');
+      const url = urlInput ? urlInput.value.trim() : '';
+      if (!url) {
+        showToast('Vui lòng nhập hoặc dán URL cần tải!', 'error');
+        return;
+      }
+
+      quickDownloadBtn.disabled = true;
+      quickDownloadBtn.innerHTML = `<span class="spinner"></span> Đang xử lý...`;
+
+      const req = {
+        url: url,
+        quality: document.getElementById('quickQuality')?.value || 'best',
+        format: document.getElementById('quickFormat')?.value || 'mp4',
+        type: 'video',
+        title: '',
+        pageUrl: '',
+      };
+
+      try {
+        try {
+          await window.go.main.App.AddDownload(req);
+        } catch {
+          await fetch('http://localhost:7890/api/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(req),
+          });
+        }
+        showToast('✅ Đã thêm vào hàng đợi tải!', 'success');
+        if (urlInput) urlInput.value = '';
+        refreshQueue();
+      } catch (err) {
+        showToast(`❌ Thất bại: ${err.message || 'Không thể kết nối backend'}`, 'error');
+      } finally {
+        quickDownloadBtn.disabled = false;
+        quickDownloadBtn.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Tải xuống
+        `;
+      }
+    });
+  }
+
+  // Phím Enter trong ô nhập
+  const mainUrlInput = document.getElementById('mainUrlInput');
+  if (mainUrlInput) {
+    mainUrlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        quickDownloadBtn?.click();
+      }
+    });
+  }
 }
 
 // ===== WEBSOCKET =====
