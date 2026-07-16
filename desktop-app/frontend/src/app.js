@@ -540,15 +540,15 @@ function setupUrlDownloader() {
       }
 
       aiExtractBtn.disabled = true;
-      aiExtractBtn.innerHTML = `<span class="spinner"></span> Đang quét bằng AI...`;
+      aiExtractBtn.innerHTML = `<span class="spinner"></span> Đang tìm link video...`;
       
       const area = document.getElementById('analysisArea');
       area.style.display = 'block';
-      document.getElementById('analysisTitle').textContent = 'Gemini AI đang tìm liên kết video ẩn...';
+      document.getElementById('analysisTitle').textContent = 'Đang phân tích trang web, tìm link video ẩn...';
       document.getElementById('analysisDomain').textContent = shortenUrl(url);
       document.getElementById('analysisThumb').src = '';
       document.getElementById('analysisDuration').textContent = '--:--';
-      document.getElementById('formatsList').innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted)"><span class="spinner"></span> Gemini AI đang đọc mã nguồn HTML và trích xuất các luồng stream video ẩn...</div>';
+      document.getElementById('formatsList').innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted)"><span class="spinner"></span> Đang tải trang, phân tích player và trích xuất link stream video...</div>';
 
       try {
         const aiResult = await window.go.main.App.AnalyzeWithAI(url);
@@ -583,7 +583,7 @@ function renderAIAnalysisResult(originalUrl, aiResult) {
   try {
     domain = new URL(originalUrl).hostname.replace('www.', '');
   } catch {}
-  document.getElementById('analysisDomain').textContent = domain + " (AI Extracted)";
+  document.getElementById('analysisDomain').textContent = domain + " (Đã trích xuất)";
 
   const thumbEl = document.getElementById('analysisThumb');
   if (aiResult.thumbnail) {
@@ -599,7 +599,7 @@ function renderAIAnalysisResult(originalUrl, aiResult) {
   formatsList.innerHTML = '';
 
   if (!aiResult.formats || aiResult.formats.length === 0) {
-    formatsList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--warning)">⚠️ AI không tìm thấy link video trực tiếp nào khả dụng trên trang này.</div>';
+    formatsList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--warning)">⚠️ Không tìm thấy link video trực tiếp nào trên trang này.<br><small>Thử dán link trực tiếp vào ô tải xuống bên trên.</small></div>';
     return;
   }
 
@@ -610,7 +610,7 @@ function renderAIAnalysisResult(originalUrl, aiResult) {
     const isVideo = fmt.ext !== 'mp3' && fmt.ext !== 'm4a';
     const typeIcon = isVideo ? '🎬' : '🎵';
     const labelText = `${fmt.title || 'Đường dẫn video'} (${fmt.ext || 'mp4'})`;
-    const descText = `Chất lượng: ${fmt.quality || 'Tự động'} • Trích xuất bởi Gemini`;
+    const descText = `Chất lượng: ${fmt.quality || 'Tự động'} • Stream trực tiếp`;
 
     itemEl.innerHTML = `
       <div class="format-info-col">
@@ -618,14 +618,14 @@ function renderAIAnalysisResult(originalUrl, aiResult) {
         <div class="format-desc">
           <strong>${esc(labelText)}</strong>
           <span>${esc(descText)}</span>
-          <span style="font-size: 10px; color: var(--accent2); word-break: break-all;">${esc(shortenUrl(fmt.URL))}</span>
+          <span style="font-size: 10px; color: var(--accent2); word-break: break-all;">${esc(shortenUrl(fmt.url))}</span>
         </div>
       </div>
       <button class="btn btn-primary btn-sm btn-dl-format">Tải về</button>
     `;
 
     itemEl.querySelector('.btn-dl-format').addEventListener('click', () => {
-      downloadSelectedFormat(originalUrl, aiResult.title || fmt.title, fmt.URL, fmt.ext);
+      downloadSelectedFormat(originalUrl, aiResult.title || fmt.title, fmt.url, fmt.ext);
     });
 
     formatsList.appendChild(itemEl);
@@ -743,14 +743,20 @@ function renderAnalysisResult(originalUrl, info) {
 }
 
 // ===== THỰC HIỆN GỬI YÊU CẦU TẢI ĐÃ CHỌN =====
-async function downloadSelectedFormat(originalUrl, videoTitle, qualityId, ext) {
+async function downloadSelectedFormat(originalUrl, videoTitle, streamUrl, ext) {
+  // Xác định type từ extension
+  let type = 'video';
+  if (ext === 'mp3' || ext === 'm4a') type = 'audio';
+  else if (ext === 'm3u8' || ext === 'hls') type = 'hls';
+  else if (ext === 'mpd') type = 'dash';
+
   const req = {
-    url: originalUrl,
-    quality: qualityId, // format_id hoặc 'best'
-    format: ext || 'mp4',
-    type: ext === 'mp3' || ext === 'm4a' ? 'audio' : 'video',
+    url: streamUrl,       // ← URL stream thực sự để tải
+    pageUrl: originalUrl, // ← URL trang gốc làm referer
+    quality: 'best',
+    format: (ext === 'm3u8' || ext === 'hls' || ext === 'mpd') ? 'mp4' : (ext || 'mp4'),
+    type: type,
     title: videoTitle,
-    pageUrl: originalUrl,
   };
 
   try {

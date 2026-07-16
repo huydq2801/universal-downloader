@@ -1,7 +1,6 @@
 package downloader
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -196,11 +195,21 @@ func isYtdlpSupportedPage(pageURL string) bool {
 	return matchesDomain(pageURL, ytdlpSupportedPageDomains)
 }
 
+// isHLSStreamURL kiểm tra có phải HLS/m3u8/vl stream không
+func isHLSStreamURL(u string) bool {
+	lower := strings.ToLower(u)
+	return strings.Contains(lower, ".m3u8") ||
+		strings.Contains(lower, ".m3u") ||
+		strings.HasSuffix(strings.Split(lower, "?")[0], ".vl") ||
+		strings.Contains(lower, "/manifest") ||
+		strings.Contains(lower, "/hls/")
+}
+
 // isDirectMediaURL kiểm tra có phải URL file media trực tiếp không
 func isDirectMediaURL(url string) bool {
 	lower := strings.ToLower(url)
 	exts := []string{".mp4", ".webm", ".mkv", ".avi", ".mov", ".flv",
-		".mp3", ".aac", ".ogg", ".wav", ".m3u8", ".mpd"}
+		".mp3", ".aac", ".ogg", ".wav", ".m3u8", ".mpd", ".vl"}
 	for _, ext := range exts {
 		if strings.Contains(lower, ext) {
 			return true
@@ -235,10 +244,9 @@ func (e *Engine) Download(ctx context.Context, req DownloadRequest, savePath str
 		return e.runYtdlp(ctx, req, downloadURL, savePath, onProgress)
 	}
 
-	// Case 3: URL là HLS/DASH stream → dùng yt-dlp hoặc ffmpeg
-	if req.Type == "hls" || req.Type == "dash" ||
-		strings.Contains(req.URL, ".m3u8") || strings.Contains(req.URL, ".mpd") {
-		return e.runYtdlp(ctx, req, req.URL, savePath, onProgress)
+	// Case 3: URL là HLS/DASH/VL stream → dùng custom Go downloader (nhanh, chính xác, giải mã PNG tự động)
+	if req.Type == "hls" || req.Type == "dash" || req.Type == "m3u8" || isHLSStreamURL(req.URL) {
+		return e.downloadHLSWithGo(ctx, req, savePath, onProgress)
 	}
 
 	// Case 4: URL là file media trực tiếp từ trang không được hỗ trợ bởi yt-dlp
@@ -267,6 +275,149 @@ func (e *Engine) Download(ctx context.Context, req DownloadRequest, savePath str
 	return nil
 }
 
+// ===== FFMPEG HLS DOWNLOADER =====
+
+// runFFmpegHLS dùng ffmpeg trực tiếp để tải HLS/m3u8/vl stream
+// Nhanh hơn, đơn giản hơn, không có lối yt-dlp compatibility
+func (e *Engine) runFFmpegHLS(ctx context.Context, req DownloadRequest, savePath string, onProgress ProgressCallback) error {
+	fileName := sanitizeFilename(req.Title)
+	if fileName == "" {
+		fileName = fmt.Sprintf("video_%d", time.Now().Unix())
+	}
+	outPath := filepath.Join(savePath, fileName+".mp4")
+
+	// Xây dựng header string cho ffmpeg
+	headers := ""
+	if req.PageURL != "" {
+		headers += fmt.Sprintf("Referer: %s\r\n", req.PageURL)
+		headers += fmt.Sprintf("Origin: %s\r\n", extractOrigin(req.PageURL))
+	}
+	headers += "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36\r\n"
+	// Custom headers
+	for k, v := range req.Headers {
+		headers += fmt.Sprintf("%s: %s\r\n", k, v)
+	}
+
+	args := []string{
+		"-y",                          // ghi đè file nếu tồn tại
+		"-loglevel", "error",           // chỉ in lỗi thực sự
+		"-extension_picky", "0",        // tắt lọc đuôi mở rộng khắt khe đối với HLS segment
+		"-allowed_extensions", "ALL",   // cho phép tất cả các loại đuôi mở rộng
+		"-allowed_segment_extensions", "ALL", // cho phép mọi loại đuôi segment
+		"-progress", "pipe:2",          // gửi progress ra stderr
+		"-stats_period", "1",           // cập nhật mỗi 1 giây
+	}
+	if headers != "" {
+		args = append(args, "-headers", headers)
+	}
+	args = append(args,
+		"-i", req.URL,
+		"-c", "copy",                   // copy codec, không re-encode
+		"-movflags", "+faststart",      // web-friendly mp4
+		outPath,
+	)
+
+	cmd := exec.CommandContext(ctx, e.ffmpeg, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+
+	// Đọc progress từ stderr
+	pipeR, pipeW, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	cmd.Stderr = pipeW
+
+	if err := cmd.Start(); err != nil {
+		pipeW.Close()
+		pipeR.Close()
+		return fmt.Errorf("không thể khởi động ffmpeg: %v", err)
+	}
+	pipeW.Close()
+
+	// Parse ffmpeg progress (format: key=value\n)
+	buf := make([]byte, 4096)
+	var fragment strings.Builder
+	var totalDuration float64
+	var errorLogs []string
+	for {
+		n, readErr := pipeR.Read(buf)
+		if n > 0 {
+			for _, b := range buf[:n] {
+				if b == '\n' {
+					line := strings.TrimSpace(fragment.String())
+					fragment.Reset()
+					if line == "" {
+						continue
+					}
+					parts := strings.SplitN(line, "=", 2)
+					if len(parts) != 2 {
+						// Quét tìm thông tin Duration từ dòng log tiêu chuẩn của FFmpeg
+						if strings.Contains(line, "Duration:") {
+							idx := strings.Index(line, "Duration:")
+							rest := strings.TrimSpace(line[idx+len("Duration:"):])
+							commaIdx := strings.Index(rest, ",")
+							if commaIdx > 0 {
+								durationStr := strings.TrimSpace(rest[:commaIdx])
+								totalDuration = parseFFmpegTime(durationStr)
+							}
+						}
+
+						if len(errorLogs) < 100 {
+							errorLogs = append(errorLogs, line)
+						} else {
+							errorLogs = append(errorLogs[1:], line)
+						}
+						continue
+					}
+					key, val := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+					switch key {
+					case "duration":
+						// format: HH:MM:SS.ms
+						totalDuration = parseFFmpegTime(val)
+					case "out_time_ms":
+						if totalDuration > 0 && onProgress != nil {
+							var outMs float64
+							fmt.Sscanf(val, "%f", &outMs)
+							pct := (outMs / 1_000_000) / totalDuration * 100
+							if pct > 100 {
+								pct = 100
+							}
+							onProgress(pct, "", "", "downloading")
+						}
+					case "speed":
+						if onProgress != nil && val != "0x" {
+							onProgress(-1, val, "", "downloading")
+						}
+					}
+				} else {
+					fragment.WriteByte(b)
+				}
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+	pipeR.Close()
+
+	if err := cmd.Wait(); err != nil {
+		if len(errorLogs) > 0 {
+			return fmt.Errorf("ffmpeg thất bại: %v\nChi tiết:\n%s", err, strings.Join(errorLogs, "\n"))
+		}
+		return fmt.Errorf("ffmpeg thất bại: %v", err)
+	}
+	return nil
+}
+
+// parseFFmpegTime parse thời gian HH:MM:SS.ms thành giây
+func parseFFmpegTime(s string) float64 {
+	var h, m, sec float64
+	if n, _ := fmt.Sscanf(s, "%f:%f:%f", &h, &m, &sec); n == 3 {
+		return h*3600 + m*60 + sec
+	}
+	return 0
+}
+
 // ===== YT-DLP RUNNER =====
 
 func (e *Engine) runYtdlp(ctx context.Context, req DownloadRequest, targetURL string, savePath string, onProgress ProgressCallback) error {
@@ -274,23 +425,47 @@ func (e *Engine) runYtdlp(ctx context.Context, req DownloadRequest, targetURL st
 	cmd := exec.CommandContext(ctx, e.ytdlp, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
-	stderr, err := cmd.StderrPipe()
+	// yt-dlp gửi progress ra stderr (HLS dùng \r, không phải \n)
+	pipeR, pipeW, err := os.Pipe()
 	if err != nil {
 		return err
 	}
+	cmd.Stdout = pipeW
+	cmd.Stderr = pipeW
 
 	if err := cmd.Start(); err != nil {
+		pipeW.Close()
+		pipeR.Close()
 		return fmt.Errorf("không thể khởi động yt-dlp: %v\nĐường dẫn: %s", err, e.ytdlp)
 	}
+	pipeW.Close() // writer đóng ở parent process
 
-	scanner := bufio.NewScanner(stderr)
-	for scanner.Scan() {
-		line := scanner.Text()
-		progress, speed, eta := parseYtdlpProgress(line)
-		if progress >= 0 && onProgress != nil {
-			onProgress(progress, speed, eta, "downloading")
+	// Đọc output theo từng token \r hoặc \n
+	buf := make([]byte, 4096)
+	var fragment strings.Builder
+	for {
+		n, readErr := pipeR.Read(buf)
+		if n > 0 {
+			for _, b := range buf[:n] {
+				if b == '\r' || b == '\n' {
+					line := fragment.String()
+					fragment.Reset()
+					if line != "" {
+						progress, speed, eta := parseYtdlpProgress(line)
+						if progress >= 0 && onProgress != nil {
+							onProgress(progress, speed, eta, "downloading")
+						}
+					}
+				} else {
+					fragment.WriteByte(b)
+				}
+			}
+		}
+		if readErr != nil {
+			break
 		}
 	}
+	pipeR.Close()
 
 	if err := cmd.Wait(); err != nil {
 		return fmt.Errorf("yt-dlp thất bại: %v", err)
@@ -306,6 +481,12 @@ func (e *Engine) buildYtdlpArgs(req DownloadRequest, targetURL, savePath string)
 		"--progress-template", "%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.speed)s|%(progress.eta)s|%(progress._percent_str)s",
 	}
 
+	// Với HLS/VL stream: bắt buộc dùng ffmpeg downloader để ghép segment
+	isHLS := isHLSStreamURL(targetURL) || req.Type == "hls" || req.Type == "m3u8"
+	if isHLS {
+		args = append(args, "--downloader", "ffmpeg", "--hls-use-mpegts")
+	}
+
 	// Chuẩn hoá quality: bỏ đuôi 'p' (vd "720p" → "720")
 	quality := strings.TrimSuffix(strings.ToLower(req.Quality), "p")
 
@@ -313,7 +494,9 @@ func (e *Engine) buildYtdlpArgs(req DownloadRequest, targetURL, savePath string)
 	case "audio":
 		args = append(args, "-x", "--audio-format", "mp3", "--audio-quality", "0")
 	case "best", "":
-		args = append(args, "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best")
+		if !isHLS {
+			args = append(args, "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best")
+		}
 	case "1080":
 		args = append(args, "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]")
 	case "720":
@@ -502,18 +685,44 @@ func (e *Engine) saveBlobData(base64Data, savePath string) error {
 }
 
 // parseYtdlpProgress parse progress từ output của yt-dlp
+// Hỗ trợ cả format pipe template và format [download] XX%
 func parseYtdlpProgress(line string) (float64, string, string) {
+	line = strings.TrimSpace(line)
+	// Format: downloaded|total|speed|eta|percent
 	parts := strings.Split(line, "|")
 	if len(parts) >= 5 {
 		percentStr := strings.TrimSpace(strings.TrimSuffix(parts[4], "%"))
 		var pct float64
 		fmt.Sscanf(percentStr, "%f", &pct)
-		return pct, strings.TrimSpace(parts[2]), strings.TrimSpace(parts[3])
+		speed := strings.TrimSpace(parts[2])
+		eta := strings.TrimSpace(parts[3])
+		if speed == "None" || speed == "N/A" {
+			speed = ""
+		}
+		if eta == "None" || eta == "N/A" {
+			eta = ""
+		}
+		return pct, speed, eta
 	}
+	// Format: [download]  5.5% of ~2.00GiB at 42.00MiB/s ETA 00:48
 	if strings.Contains(line, "[download]") && strings.Contains(line, "%") {
+		// Tìm phần trăm
+		idx := strings.Index(line, "[download]")
+		rest := line[idx+len("[download]"):]
 		var pct float64
-		if _, err := fmt.Sscanf(line, "[download] %f%%", &pct); err == nil {
-			return pct, "", ""
+		if _, err := fmt.Sscanf(strings.TrimSpace(rest), "%f%%", &pct); err == nil {
+			speed := ""
+			eta := ""
+			if atIdx := strings.Index(rest, " at "); atIdx >= 0 {
+				speedEta := rest[atIdx+4:]
+				if etaIdx := strings.Index(speedEta, " ETA "); etaIdx >= 0 {
+					speed = strings.TrimSpace(speedEta[:etaIdx])
+					eta = strings.TrimSpace(speedEta[etaIdx+5:])
+				} else {
+					speed = strings.Fields(speedEta)[0]
+				}
+			}
+			return pct, speed, eta
 		}
 	}
 	return -1, "", ""
