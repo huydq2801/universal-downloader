@@ -436,53 +436,59 @@ function setupUrlDownloader() {
     });
   }
 
-  // Nút Tải xuống nhanh
+  // Nút đóng bảng phân tích
+  document.getElementById('closeAnalysisBtn')?.addEventListener('click', () => {
+    document.getElementById('analysisArea').style.display = 'none';
+  });
+
+  // Nút Phân tích / Tải xuống chính
   const quickDownloadBtn = document.getElementById('quickDownloadBtn');
   if (quickDownloadBtn) {
+    // Đổi tên nút thành Phân tích
+    quickDownloadBtn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <circle cx="11" cy="11" r="8"/>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      Phân tích
+    `;
+
     quickDownloadBtn.addEventListener('click', async () => {
       const urlInput = document.getElementById('mainUrlInput');
       const url = urlInput ? urlInput.value.trim() : '';
       if (!url) {
-        showToast('Vui lòng nhập hoặc dán URL cần tải!', 'error');
+        showToast('Vui lòng nhập hoặc dán URL trang web / video cần tải!', 'error');
         return;
       }
 
       quickDownloadBtn.disabled = true;
-      quickDownloadBtn.innerHTML = `<span class="spinner"></span> Đang xử lý...`;
-
-      const req = {
-        url: url,
-        quality: document.getElementById('quickQuality')?.value || 'best',
-        format: document.getElementById('quickFormat')?.value || 'mp4',
-        type: 'video',
-        title: '',
-        pageUrl: '',
-      };
+      quickDownloadBtn.innerHTML = `<span class="spinner"></span> Đang quét...`;
+      
+      // Hiện khung phân tích với trạng thái đang tải
+      const area = document.getElementById('analysisArea');
+      area.style.display = 'block';
+      document.getElementById('analysisTitle').textContent = 'Đang phân tích liên kết...';
+      document.getElementById('analysisDomain').textContent = shortenUrl(url);
+      document.getElementById('analysisThumb').src = '';
+      document.getElementById('analysisDuration').textContent = '00:00';
+      document.getElementById('formatsList').innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted)"><span class="spinner"></span> Đang tải các định dạng video khả dụng từ trang...</div>';
 
       try {
-        try {
-          await window.go.main.App.AddDownload(req);
-        } catch {
-          await fetch('http://localhost:7890/api/download', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(req),
-          });
-        }
-        showToast('✅ Đã thêm vào hàng đợi tải!', 'success');
-        if (urlInput) urlInput.value = '';
-        refreshQueue();
+        const info = await window.go.main.App.GetInfo(url);
+        if (!info) throw new Error('Không nhận được thông tin video.');
+        
+        renderAnalysisResult(url, info);
       } catch (err) {
-        showToast(`❌ Thất bại: ${err.message || 'Không thể kết nối backend'}`, 'error');
+        showToast(`❌ Phân tích thất bại: ${err.message || err}`, 'error');
+        document.getElementById('formatsList').innerHTML = `<div style="padding: 20px; text-align: center; color: var(--error)">❌ Không thể phân tích link này. Thử dán link trực tiếp hơn hoặc tải lại.<br><small>${esc(err.message || err)}</small></div>`;
       } finally {
         quickDownloadBtn.disabled = false;
         quickDownloadBtn.innerHTML = `
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7 10 12 15 17 10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
-          Tải xuống
+          Phân tích
         `;
       }
     });
@@ -496,6 +502,142 @@ function setupUrlDownloader() {
         quickDownloadBtn?.click();
       }
     });
+  }
+}
+
+// ===== RENDER KẾT QUẢ PHÂN TÍCH =====
+function renderAnalysisResult(originalUrl, info) {
+  document.getElementById('analysisTitle').textContent = info.title || 'Video';
+  
+  let domain = 'Website';
+  try {
+    domain = new URL(originalUrl).hostname.replace('www.', '');
+  } catch {}
+  document.getElementById('analysisDomain').textContent = domain;
+
+  // Thumbnail
+  const thumbEl = document.getElementById('analysisThumb');
+  if (info.thumbnail) {
+    thumbEl.src = info.thumbnail;
+    thumbEl.style.display = 'block';
+  } else {
+    thumbEl.style.display = 'none';
+  }
+
+  // Duration
+  const durationEl = document.getElementById('analysisDuration');
+  if (info.duration > 0) {
+    const mins = Math.floor(info.duration / 60);
+    const secs = Math.floor(info.duration % 60);
+    durationEl.textContent = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    durationEl.style.display = 'inline-block';
+  } else {
+    durationEl.style.display = 'none';
+  }
+
+  const formatsList = document.getElementById('formatsList');
+  formatsList.innerHTML = '';
+
+  // Nhóm các format phổ biến hoặc hiển thị định dạng tốt nhất trước
+  // 1. Tải tốt nhất
+  const bestRow = document.createElement('div');
+  bestRow.className = 'format-item best-format';
+  bestRow.innerHTML = `
+    <div class="format-info-col">
+      <span class="format-icon">🚀</span>
+      <div class="format-desc">
+        <strong>Tự động (Chất lượng cao nhất)</strong>
+        <span>Tải ghép video + audio tốt nhất có sẵn</span>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-sm btn-dl-format">Tải xuống</button>
+  `;
+  bestRow.querySelector('.btn-dl-format').addEventListener('click', () => {
+    downloadSelectedFormat(originalUrl, info.title, 'best', 'mp4');
+  });
+  formatsList.appendChild(bestRow);
+
+  // 2. Tách các formats cụ thể
+  if (info.formats && info.formats.length > 0) {
+    // Sắp xếp format video từ cao xuống thấp và filter bớt trùng lặp
+    const seenHeights = new Set();
+    const sortedFormats = info.formats
+      .filter(f => f.height || f.format_note)
+      .sort((a, b) => (b.height || 0) - (a.height || 0));
+
+    for (const fmt of sortedFormats) {
+      // Chỉ hiển thị các format video chính hoặc audio chính để tránh làm rối UI
+      const isVideo = fmt.vcodec !== 'none';
+      const height = fmt.height;
+      const sizeStr = fmt.filesize ? formatSize(fmt.filesize) : (fmt.tbr ? `~${Math.round(fmt.tbr)}kbps` : '');
+      const formatLabel = fmt.format_note || (height ? `${height}p` : 'Video');
+      
+      // Dedup heights để gọn gàng
+      if (isVideo && height) {
+        const key = `${height}_${fmt.ext}`;
+        if (seenHeights.has(key)) continue;
+        seenHeights.add(key);
+      }
+
+      const itemEl = document.createElement('div');
+      itemEl.className = 'format-item';
+      
+      const typeIcon = isVideo ? '🎬' : '🎵';
+      const labelText = isVideo ? `${formatLabel} (${fmt.ext})` : `Audio (${fmt.ext})`;
+      const descText = isVideo 
+        ? `${fmt.width ? fmt.width + 'x' + fmt.height : ''} ${fmt.fps ? fmt.fps + 'fps' : ''} ${fmt.vcodec !== 'none' && fmt.acodec === 'none' ? '• Video only' : ''}` 
+        : `Bitrate: ${Math.round(fmt.tbr || 0)}kbps`;
+
+      itemEl.innerHTML = `
+        <div class="format-info-col">
+          <span class="format-icon">${typeIcon}</span>
+          <div class="format-desc">
+            <strong>${labelText}</strong>
+            <span>${descText} ${sizeStr ? '• ' + sizeStr : ''}</span>
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-sm btn-dl-format">Tải về</button>
+      `;
+
+      itemEl.querySelector('.btn-dl-format').addEventListener('click', () => {
+        // Nếu là video-only, dùng yt-dlp format selection để merge audio tự động
+        let quality = fmt.format_id;
+        if (fmt.vcodec !== 'none' && fmt.acodec === 'none') {
+          // Kêu yt-dlp ghép format video này với audio tốt nhất
+          quality = `${fmt.format_id}+bestaudio`;
+        }
+        downloadSelectedFormat(originalUrl, info.title, quality, fmt.ext);
+      });
+
+      formatsList.appendChild(itemEl);
+    }
+  }
+}
+
+// ===== THỰC HIỆN GỬI YÊU CẦU TẢI ĐÃ CHỌN =====
+async function downloadSelectedFormat(originalUrl, videoTitle, qualityId, ext) {
+  const req = {
+    url: originalUrl,
+    quality: qualityId, // format_id hoặc 'best'
+    format: ext || 'mp4',
+    type: ext === 'mp3' || ext === 'm4a' ? 'audio' : 'video',
+    title: videoTitle,
+    pageUrl: originalUrl,
+  };
+
+  try {
+    await window.go.main.App.AddDownload(req);
+    showToast('✅ Đã thêm vào hàng đợi tải xuống!', 'success');
+    
+    // Đóng panel và clear ô nhập
+    document.getElementById('analysisArea').style.display = 'none';
+    document.getElementById('mainUrlInput').value = '';
+    
+    // Switch to queue
+    navigateTo('queue');
+    refreshQueue();
+  } catch (err) {
+    showToast(`❌ Thất bại: ${err.message || err}`, 'error');
   }
 }
 

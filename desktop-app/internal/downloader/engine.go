@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -97,19 +98,29 @@ func (e *Engine) findTool(name string) string {
 
 func (e *Engine) CheckTools() map[string]bool {
 	result := map[string]bool{}
-	if cmd := exec.Command(e.ytdlp, "--version"); cmd.Run() == nil {
+	
+	cmd1 := exec.Command(e.ytdlp, "--version")
+	cmd1.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if cmd1.Run() == nil {
 		result["ytdlp"] = true
 	}
-	if cmd := exec.Command(e.ffmpeg, "-version"); cmd.Run() == nil {
+	
+	cmd2 := exec.Command(e.ffmpeg, "-version")
+	cmd2.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if cmd2.Run() == nil {
 		result["ffmpeg"] = true
 	}
+	
 	return result
 }
 
 // GetInfo lấy thông tin media từ URL
 func (e *Engine) GetInfo(url string) (*MediaInfo, error) {
 	args := []string{"--dump-json", "--no-playlist", "--no-warnings", url}
-	out, err := exec.Command(e.ytdlp, args...).Output()
+	cmd := exec.Command(e.ytdlp, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("yt-dlp error: %v", err)
 	}
@@ -261,6 +272,7 @@ func (e *Engine) Download(ctx context.Context, req DownloadRequest, savePath str
 func (e *Engine) runYtdlp(ctx context.Context, req DownloadRequest, targetURL string, savePath string, onProgress ProgressCallback) error {
 	args := e.buildYtdlpArgs(req, targetURL, savePath)
 	cmd := exec.CommandContext(ctx, e.ytdlp, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {

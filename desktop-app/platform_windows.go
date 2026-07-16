@@ -2,9 +2,12 @@ package main
 
 import (
 	"os/exec"
+	"syscall"
 )
 
 // openExplorer mở Windows Explorer tại path
 func openExplorer(path string) error {
-	return exec.Command("explorer", path).Start()
+	cmd := exec.Command("explorer", path)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	return cmd.Start()
 }

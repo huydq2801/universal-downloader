@@ -148,6 +148,33 @@
           </div>
         </div>
 
+        <!-- Analysis Area (Hiển thị video được phân tích) -->
+        <div class="analysis-area" id="analysisArea" style="display:none">
+          <div class="analysis-card">
+            <div class="analysis-close-btn" id="closeAnalysisBtn" title="Đóng">✕</div>
+            <div class="analysis-header">
+              <div class="analysis-thumb-wrap">
+                <img id="analysisThumb" class="analysis-thumb" src="" alt="Thumbnail">
+              </div>
+              <div class="analysis-info">
+                <h3 id="analysisTitle" class="analysis-title">Đang phân tích video...</h3>
+                <p id="analysisDomain" class="analysis-domain">youtube.com</p>
+                <div class="analysis-tags">
+                  <span id="analysisDuration" class="badge badge-quality">00:00</span>
+                  <span class="badge badge-video">VIDEO</span>
+                </div>
+              </div>
+            </div>
+            
+            <div class="analysis-formats-section">
+              <h4>Chọn định dạng bạn muốn tải xuống:</h4>
+              <div class="formats-list" id="formatsList">
+                <!-- formats render dynamic here -->
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Stats -->
         <div class="stats-row">
           <div class="stat-card">
