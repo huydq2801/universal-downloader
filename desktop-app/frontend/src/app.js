@@ -14,15 +14,29 @@ let currentPage = 'queue';
 let wsConnection = null;
 
 // ===== INIT =====
-document.addEventListener('DOMContentLoaded', async () => {
+let appInitialized = false;
+
+async function initApp() {
+  if (appInitialized) return;
+  appInitialized = true;
+  
   setupNavigation();
   setupUrlDownloader();
   await loadInitialData();
-  connectWebSocket();
   setupWailsEvents();
   
   // Refresh queue mỗi 2 giây
   setInterval(refreshQueue, 2000);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Lắng nghe sự kiện Wails đã sẵn sàng
+  window.addEventListener('wails:ready', initApp);
+  
+  // Phòng hờ chạy debug hoặc Wails đã sẵn sàng trước DOMContentLoaded
+  if (window.go) {
+    initApp();
+  }
 });
 
 // ===== NAVIGATION =====
@@ -65,23 +79,19 @@ async function loadVersion() {
   } catch {}
 }
 
-// ===== QUEUE =====
 async function refreshQueue() {
   try {
-    // Lấy từ Wails binding
-    queueItems = await window.go.main.App.GetQueueItems() || [];
-  } catch {
-    // Fallback: lấy từ HTTP API
-    try {
-      const r = await fetch('http://localhost:7890/api/queue');
-      const data = await r.json();
-      queueItems = data.items || [];
-    } catch { return; }
+    if (window.go?.main?.App) {
+      queueItems = await window.go.main.App.GetQueueItems() || [];
+    }
+  } catch (err) {
+    console.error("Lỗi lấy hàng đợi:", err);
   }
   
   renderQueue();
   updateStats();
 }
+
 
 function renderQueue() {
   const listEl = document.getElementById('queueList');
@@ -230,29 +240,35 @@ function updateStats() {
 // ===== QUEUE ACTIONS =====
 async function cancelDownload(id) {
   try {
-    await window.go.main.App.CancelDownload(id);
-    showToast('Đã hủy tải xuống', 'success');
-  } catch {
-    await fetch(`http://localhost:7890/api/queue/${id}`, { method: 'DELETE' });
+    if (window.go?.main?.App) {
+      await window.go.main.App.CancelDownload(id);
+      showToast('Đã hủy tải xuống', 'success');
+    }
+  } catch (err) {
+    showToast('Lỗi: ' + err.message, 'error');
   }
   refreshQueue();
 }
 
 async function retryDownload(id) {
   try {
-    await window.go.main.App.RetryDownload(id);
-    showToast('Đang thử lại...', 'success');
-  } catch {
-    await fetch(`http://localhost:7890/api/queue/${id}/retry`, { method: 'POST' });
+    if (window.go?.main?.App) {
+      await window.go.main.App.RetryDownload(id);
+      showToast('Đang thử lại...', 'success');
+    }
+  } catch (err) {
+    showToast('Lỗi: ' + err.message, 'error');
   }
   refreshQueue();
 }
 
 async function removeDownload(id) {
   try {
-    await window.go.main.App.RemoveDownload(id);
-  } catch {
-    await fetch(`http://localhost:7890/api/queue/${id}/remove`, { method: 'DELETE' });
+    if (window.go?.main?.App) {
+      await window.go.main.App.RemoveDownload(id);
+    }
+  } catch (err) {
+    console.error("Lỗi xóa download:", err);
   }
   refreshQueue();
 }
@@ -274,13 +290,11 @@ document.getElementById('clearCompletedBtn')?.addEventListener('click', async ()
 // ===== HISTORY =====
 async function loadHistory() {
   try {
-    historyItems = await window.go.main.App.GetDownloadList() || [];
-  } catch {
-    try {
-      const r = await fetch('http://localhost:7890/api/history');
-      const data = await r.json();
-      historyItems = data.records || [];
-    } catch { return; }
+    if (window.go?.main?.App) {
+      historyItems = await window.go.main.App.GetDownloadList() || [];
+    }
+  } catch (err) {
+    console.error("Lỗi lấy lịch sử:", err);
   }
   renderHistory();
 }
@@ -339,9 +353,19 @@ function renderHistory() {
 document.getElementById('clearHistoryBtn')?.addEventListener('click', async () => {
   if (!confirm('Xóa toàn bộ lịch sử tải?')) return;
   try {
-    await fetch('http://localhost:7890/api/history', { method: 'DELETE' });
-    showToast('Đã xóa lịch sử', 'success');
-    loadHistory();
+    if (window.go?.main?.App) {
+      // Hãy gọi API xóa lịch sử thông qua DB ở Backend. 
+      // Đợi đã, Wails app.go không có binding trực tiếp cho ClearHistory, nhưng chúng ta có thể gọi qua db.
+      // Để xem app.go có binding gì cho việc này không... 
+      // Không có, nhưng DB của Wails là SQLite. Hãy kiểm tra nếu có API nào hoặc ta sẽ thêm một binding cho ClearHistory.
+      // Hoặc ta có thể add một method ClearHistory() trong app.go.
+      // Hãy tạm thời gọi RemoveDownload cho từng record trong historyItems để xóa sạch.
+      for (const item of historyItems) {
+        await window.go.main.App.RemoveDownload(item.id);
+      }
+      showToast('Đã xóa lịch sử', 'success');
+      loadHistory();
+    }
   } catch (e) {
     showToast('Lỗi: ' + e.message, 'error');
   }
