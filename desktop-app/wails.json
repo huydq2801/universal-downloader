@@ -1,0 +1,20 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "universal-downloader",
+  "outputfilename": "UniversalDownloader",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "wailsjsdir": "./frontend/wailsjs",
+  "version": "2",
+  "info": {
+    "companyName": "UniversalDL",
+    "productName": "UniversalDownloader",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright 2024",
+    "comments": "Tải mọi video từ mọi trang web"
+  },
+  "assetdir": "frontend",
+  "reloaddirs": ""
+}

@@ -1,0 +1,44 @@
+# Go
+/desktop-app/bin/
+/desktop-app/build/bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Wails
+/desktop-app/frontend/dist/
+
+# Go build cache
+/desktop-app/vendor/
+
+# Binaries
+yt-dlp.exe
+ffmpeg.exe
+ffprobe.exe
+
+# SQLite database
+*.db
+*.sqlite
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Downloads (user data)
+downloads/
+
+# Environment
+.env
+.env.local
