@@ -113,15 +113,20 @@ Quy tắc:
 
 LƯU Ý QUAN TRỌNG: Chỉ trả về mã JSON hợp lệ duy nhất, không thêm bất kỳ văn bản giải thích, không gói trong dấu nháy ngược markdown (ví dụ không dùng `+"`json ...`"+`). Chỉ trả về chuỗi JSON bắt đầu bằng { và kết thúc bằng }.`, pageURL, cleanedHTML)
 
-	// Tạo request payload cho Gemini API
+	// Tạo request payload cho Gemini API với cấu hình vô hiệu hóa bộ lọc an toàn
 	type ContentPart struct {
 		Text string `json:"text"`
 	}
 	type RequestContent struct {
 		Parts []ContentPart `json:"parts"`
 	}
+	type SafetySetting struct {
+		Category  string `json:"category"`
+		Threshold string `json:"threshold"`
+	}
 	type GeminiRequest struct {
-		Contents []RequestContent `json:"contents"`
+		Contents       []RequestContent `json:"contents"`
+		SafetySettings []SafetySetting  `json:"safetySettings"`
 	}
 	
 	reqBody := GeminiRequest{
@@ -131,6 +136,12 @@ LƯU Ý QUAN TRỌNG: Chỉ trả về mã JSON hợp lệ duy nhất, không th
 					{Text: prompt},
 				},
 			},
+		},
+		SafetySettings: []SafetySetting{
+			{Category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", Threshold: "BLOCK_NONE"},
+			{Category: "HARM_CATEGORY_HATE_SPEECH", Threshold: "BLOCK_NONE"},
+			{Category: "HARM_CATEGORY_HARASSMENT", Threshold: "BLOCK_NONE"},
+			{Category: "HARM_CATEGORY_DANGEROUS_CONTENT", Threshold: "BLOCK_NONE"},
 		},
 	}
 	
@@ -188,8 +199,12 @@ LƯU Ý QUAN TRỌNG: Chỉ trả về mã JSON hợp lệ duy nhất, không th
 		return nil, fmt.Errorf("unmarshal Gemini response error: %v", err)
 	}
 
+	if len(geminiResp.Candidates) > 0 && geminiResp.Candidates[0].FinishReason == "SAFETY" {
+		return nil, fmt.Errorf("Gemini đã chặn phân tích trang này do bộ lọc an toàn nội dung nhạy cảm (Safety Block). Bạn hãy đổi API Key khác hoặc chọn Model thông minh hơn (như Gemini 3.1) trong Cài đặt.")
+	}
+
 	if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
-		return nil, fmt.Errorf("Gemini không trả về kết quả phân tích nào")
+		return nil, fmt.Errorf("Gemini không trả về kết quả phân tích nào (Mảng Candidates trống hoặc bị chặn)")
 	}
 
 	aiText := geminiResp.Candidates[0].Content.Parts[0].Text
