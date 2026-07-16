@@ -499,8 +499,25 @@ function setupWailsEvents() {
 function extractTitleFromUrl(url) {
   try {
     const u = new URL(url || '');
+    const host = u.hostname.replace('www.', '');
+    // YouTube
+    if (host === 'youtube.com' || host === 'youtu.be') {
+      return 'YouTube Video';
+    }
+    // Facebook
+    if (host.includes('facebook.com') || host === 'fb.watch') return 'Facebook Video';
+    // TikTok
+    if (host.includes('tiktok.com')) return 'TikTok Video';
+    // Instagram
+    if (host.includes('instagram.com')) return 'Instagram Video';
+    // Twitter/X
+    if (host.includes('twitter.com') || host === 'x.com') return 'X/Twitter Video';
+    // Generic: lấy tên file từ path nhưng bỏ qua 'watch'
     const parts = u.pathname.split('/').filter(Boolean);
-    return decodeURIComponent(parts[parts.length - 1] || u.hostname);
+    const last = parts[parts.length - 1] || '';
+    const clean = decodeURIComponent(last).replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ');
+    if (clean && clean !== 'watch' && clean.length > 1) return clean;
+    return host;
   } catch {
     return 'Video';
   }

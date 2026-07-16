@@ -565,19 +565,102 @@ html, body {
   to { transform: rotate(360deg); }
 }
 
-/* ===== Download progress on item ===== */
-.item-progress {
-  height: 2px;
-  background: var(--border);
-  border-radius: 1px;
-  margin-top: 4px;
-  overflow: hidden;
+/* ===== yt-dlp Banner ===== */
+.ytdlp-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, rgba(108,99,255,0.12), rgba(78,205,196,0.08));
+  border-bottom: 1px solid rgba(108,99,255,0.25);
+  flex-shrink: 0;
 }
 
-.item-progress-bar {
-  height: 100%;
-  background: linear-gradient(90deg, var(--accent), var(--accent2));
-  border-radius: 1px;
-  transition: width 0.3s;
-  width: 0%;
+.ytdlp-banner-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.ytdlp-banner-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ytdlp-banner-text strong {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.ytdlp-banner-text span {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.ytdlp-scan-btn {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(108,99,255,0.4);
+  background: rgba(108,99,255,0.15);
+  color: #B8B4FF;
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ytdlp-scan-btn:hover {
+  background: rgba(108,99,255,0.3);
+  border-color: rgba(108,99,255,0.6);
+}
+
+.ytdlp-scan-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===== Selects row in download bar ===== */
+.selects-row {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.selects-row .quality-select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ===== Badge yt-dlp ===== */
+.badge-ytdlp {
+  background: rgba(108,99,255,0.25);
+  color: #B8B4FF;
+  border: 1px solid rgba(108,99,255,0.3);
+}
+
+/* ===== quick-dl-btn alias ===== */
+.quick-dl-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.quick-dl-btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+  transform: scale(1.05);
 }

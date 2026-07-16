@@ -1,110 +1,177 @@
 /**
- * UniversalDownloader — Popup JavaScript
- * Quản lý UI popup, hiển thị media, xử lý tải xuống
+ * UniversalDownloader — Popup v2
+ * Hỗ trợ cả network-captured media và yt-dlp info lookup
  */
 
 const BACKEND_URL = 'http://localhost:7890';
 
-// State
 let mediaList = [];
 let selectedIds = new Set();
 let currentFilter = 'all';
 let backendOnline = false;
+let currentPageUrl = '';
+let currentPageTitle = '';
+let ytdlpChecked = false;
+let isScanningYtdlp = false;
 
-// DOM refs
 const $ = id => document.getElementById(id);
-const mediaListEl = $('mediaList');
-const emptyState = $('emptyState');
-const downloadBar = $('downloadBar');
-const downloadBtn = $('downloadBtn');
-const qualitySelect = $('qualitySelect');
-const selectedCountEl = $('selectedCount');
-const statusDot = $('statusDot');
-const statusText = $('statusText');
-const pageTitleEl = $('pageTitle');
-
-// Type icons mapping
-const TYPE_ICONS = {
-  video: { emoji: '🎬', class: 'type-video', badge: 'badge-video', label: 'VIDEO' },
-  hls: { emoji: '📡', class: 'type-hls', badge: 'badge-hls', label: 'HLS' },
-  dash: { emoji: '📡', class: 'type-dash', badge: 'badge-dash', label: 'DASH' },
-  audio: { emoji: '🎵', class: 'type-audio', badge: 'badge-audio', label: 'AUDIO' },
-  blob: { emoji: '💾', class: 'type-blob', badge: 'badge-blob', label: 'BLOB' },
-};
 
 // ===== INIT =====
-
 async function init() {
   await checkBackend();
-  loadMediaFromBackground();
-  
-  // Auto-refresh mỗi 3 giây
-  setInterval(loadMediaFromBackground, 3000);
-  setInterval(checkBackend, 5000);
+  await loadMedia();
+  setInterval(loadMedia, 3000);
+  setInterval(checkBackend, 8000);
 }
 
-// ===== BACKEND STATUS =====
-
+// ===== BACKEND CHECK =====
 async function checkBackend() {
   try {
     const r = await fetch(`${BACKEND_URL}/api/status`, { signal: AbortSignal.timeout(2000) });
-    if (r.ok) {
-      backendOnline = true;
-      statusDot.className = 'status-dot online';
-      statusText.textContent = 'Backend đang chạy • Sẵn sàng tải';
-    } else {
-      throw new Error('Not OK');
-    }
+    backendOnline = r.ok;
   } catch {
     backendOnline = false;
-    statusDot.className = 'status-dot offline';
-    statusText.textContent = 'Backend chưa chạy — Mở ứng dụng UniversalDL';
+  }
+  const dot = $('statusDot');
+  const txt = $('statusText');
+  if (dot && txt) {
+    dot.className = 'status-dot ' + (backendOnline ? 'online' : 'offline');
+    txt.textContent = backendOnline ? 'Backend đang chạy • Sẵn sàng tải' : 'Backend chưa chạy — Mở UniversalDL';
   }
 }
 
 // ===== LOAD MEDIA =====
+async function loadMedia() {
+  return new Promise(resolve => {
+    chrome.runtime.sendMessage({ type: 'GET_MEDIA_LIST' }, (resp) => {
+      if (chrome.runtime.lastError || !resp) { resolve(); return; }
+      mediaList = resp.mediaList || [];
+      currentPageTitle = resp.pageTitle || '';
+      currentPageUrl = resp.pageUrl || '';
+      ytdlpChecked = resp.ytdlpChecked || false;
 
-async function loadMediaFromBackground() {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: 'GET_MEDIA_LIST' }, (response) => {
-      if (chrome.runtime.lastError || !response) {
-        resolve();
-        return;
-      }
-      
-      mediaList = response.mediaList || [];
-      
-      if (response.pageTitle) {
-        pageTitleEl.textContent = response.pageTitle;
-        pageTitleEl.title = response.pageTitle;
-      }
-      
-      // Cập nhật tab counts
+      const el = $('pageTitle');
+      if (el && currentPageTitle) { el.textContent = currentPageTitle; el.title = currentPageTitle; }
+
       updateTabCounts();
       renderMediaList();
+      updateYtdlpBanner();
       resolve();
     });
   });
 }
 
+// ===== YTDLP BANNER =====
+function updateYtdlpBanner() {
+  const banner = $('ytdlpBanner');
+  if (!banner) return;
+
+  if (!currentPageUrl) { banner.style.display = 'none'; return; }
+
+  const YTDLP_DOMAINS = [
+    'youtube.com','youtu.be','tiktok.com','instagram.com','facebook.com',
+    'fb.watch','twitter.com','x.com','twitch.tv','vimeo.com',
+    'dailymotion.com','bilibili.com','reddit.com','soundcloud.com',
+  ];
+  let isSupported = false;
+  try {
+    const host = new URL(currentPageUrl).hostname.replace('www.', '');
+    isSupported = YTDLP_DOMAINS.some(d => host === d || host.endsWith('.' + d));
+  } catch {}
+
+  if (isSupported && mediaList.filter(m => m.source === 'ytdlp').length === 0) {
+    banner.style.display = 'flex';
+    const btn = $('ytdlpScanBtn');
+    if (btn) {
+      btn.textContent = isScanningYtdlp ? '⏳ Đang quét...' : '🔍 Quét với yt-dlp';
+      btn.disabled = isScanningYtdlp;
+    }
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+// ===== YTDLP SCAN =====
+async function scanWithYtdlp() {
+  if (!backendOnline) { showToast('❌ Backend chưa chạy!', 'error'); return; }
+  if (!currentPageUrl) { showToast('❌ Không xác định được trang hiện tại', 'error'); return; }
+  if (isScanningYtdlp) return;
+
+  isScanningYtdlp = true;
+  updateYtdlpBanner();
+  showToast('🔍 Đang quét với yt-dlp...', '');
+
+  try {
+    // Gửi request tới backend để lấy info
+    const r = await fetch(`${BACKEND_URL}/api/info`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: currentPageUrl }),
+      signal: AbortSignal.timeout(25000),
+    });
+
+    if (!r.ok) throw new Error(`Lỗi backend: ${r.status}`);
+    const info = await r.json();
+
+    // Thêm vào media list trong background
+    chrome.runtime.sendMessage({
+      type: 'MEDIA_FOUND',
+      url: currentPageUrl,
+      mediaType: 'video',
+      source: 'ytdlp',
+      title: info.title || currentPageTitle,
+      thumbnail: info.thumbnail || '',
+      quality: 'best',
+    });
+
+    // Nếu có các formats cụ thể, thêm từng format
+    if (info.formats && info.formats.length > 0) {
+      // Nhóm theo height (quality)
+      const seen = new Set();
+      for (const fmt of info.formats) {
+        if (!fmt.url) continue;
+        if (seen.has(fmt.height)) continue;
+        if (!fmt.height && !fmt.tbr) continue;
+        seen.add(fmt.height);
+
+        chrome.runtime.sendMessage({
+          type: 'MEDIA_FOUND',
+          url: fmt.url,
+          mediaType: fmt.vcodec !== 'none' ? 'video' : 'audio',
+          source: 'ytdlp-format',
+          title: info.title || '',
+          quality: fmt.height ? `${fmt.height}p` : '',
+          contentType: '',
+        });
+      }
+    }
+
+    showToast(`✅ Tìm thấy: ${info.title || 'video'}`, 'success');
+    await loadMedia();
+  } catch (err) {
+    showToast(`❌ Không quét được: ${err.message}`, 'error');
+  } finally {
+    isScanningYtdlp = false;
+    updateYtdlpBanner();
+  }
+}
+
+// ===== COUNTS =====
 function updateTabCounts() {
   const counts = { all: mediaList.length, video: 0, hls: 0, audio: 0 };
-  
   for (const m of mediaList) {
     if (m.type === 'video' || m.type === 'blob') counts.video++;
     else if (m.type === 'hls' || m.type === 'dash') counts.hls++;
     else if (m.type === 'audio') counts.audio++;
   }
-  
-  $('countAll').textContent = counts.all;
-  $('countVideo').textContent = counts.video;
-  $('countHls').textContent = counts.hls;
-  $('countAudio').textContent = counts.audio;
+  if ($('countAll')) $('countAll').textContent = counts.all;
+  if ($('countVideo')) $('countVideo').textContent = counts.video;
+  if ($('countHls')) $('countHls').textContent = counts.hls;
+  if ($('countAudio')) $('countAudio').textContent = counts.audio;
 }
 
 // ===== RENDER =====
-
-function getFilteredMedia() {
+function getFiltered() {
   if (currentFilter === 'all') return mediaList;
   if (currentFilter === 'video') return mediaList.filter(m => m.type === 'video' || m.type === 'blob');
   if (currentFilter === 'hls') return mediaList.filter(m => m.type === 'hls' || m.type === 'dash');
@@ -113,272 +180,230 @@ function getFilteredMedia() {
 }
 
 function renderMediaList() {
-  const filtered = getFilteredMedia();
-  
-  // Xóa items cũ (không xóa empty state)
-  const existingItems = mediaListEl.querySelectorAll('.media-item');
-  existingItems.forEach(el => el.remove());
-  
+  const list = $('mediaList');
+  const empty = $('emptyState');
+  if (!list) return;
+
+  list.querySelectorAll('.media-item').forEach(el => el.remove());
+  const filtered = getFiltered();
+
   if (filtered.length === 0) {
-    emptyState.style.display = 'flex';
+    if (empty) empty.style.display = 'flex';
     return;
   }
-  
-  emptyState.style.display = 'none';
-  
+  if (empty) empty.style.display = 'none';
+
   for (const item of filtered) {
-    const el = createMediaItemEl(item);
-    mediaListEl.appendChild(el);
+    list.appendChild(createItemEl(item));
   }
 }
 
-function createMediaItemEl(item) {
-  const typeInfo = TYPE_ICONS[item.type] || TYPE_ICONS.video;
+const TYPE_ICONS = {
+  video:  { emoji: '🎬', cls: 'type-video',  badge: 'badge-video',  label: 'VIDEO' },
+  hls:    { emoji: '📡', cls: 'type-hls',    badge: 'badge-hls',    label: 'HLS' },
+  dash:   { emoji: '📡', cls: 'type-dash',   badge: 'badge-dash',   label: 'DASH' },
+  audio:  { emoji: '🎵', cls: 'type-audio',  badge: 'badge-audio',  label: 'AUDIO' },
+  blob:   { emoji: '💾', cls: 'type-blob',   badge: 'badge-blob',   label: 'BLOB' },
+};
+
+function createItemEl(item) {
+  const ti = TYPE_ICONS[item.type] || TYPE_ICONS.video;
   const isSelected = selectedIds.has(item.id);
+  const title = item.title || smartTitle(item.url);
   const shortUrl = shortenUrl(item.url);
-  const sizeStr = item.size ? formatSize(item.size) : '';
-  const title = item.title || extractTitleFromUrl(item.url);
-  
+  const sizeStr = item.size ? fmtSize(item.size) : '';
+  const isYtdlp = item.source === 'ytdlp' || item.source === 'ytdlp-format';
+
   const el = document.createElement('div');
   el.className = `media-item${isSelected ? ' selected' : ''}`;
-  el.dataset.id = item.id;
-  
+  el.dataset.id = String(item.id);
+
   el.innerHTML = `
     <div class="item-check">
       <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="white" stroke-width="2.5">
         <polyline points="2 6 5 9 10 3"/>
       </svg>
     </div>
-    <div class="item-type-icon ${typeInfo.class}">${typeInfo.emoji}</div>
+    <div class="item-type-icon ${ti.cls}">${ti.emoji}</div>
     <div class="item-info">
-      <div class="item-title" title="${escHtml(title)}">${escHtml(title)}</div>
-      <div class="item-url" title="${escHtml(item.url)}">${escHtml(shortUrl)}</div>
+      <div class="item-title" title="${esc(title)}">${esc(title)}</div>
+      <div class="item-url" title="${esc(item.url)}">${esc(shortUrl)}</div>
       <div class="item-meta">
-        <span class="badge ${typeInfo.badge}">${typeInfo.label}</span>
-        ${item.quality ? `<span class="badge badge-quality">${escHtml(item.quality)}</span>` : ''}
+        <span class="badge ${ti.badge}">${ti.label}</span>
+        ${item.quality ? `<span class="badge badge-quality">${esc(item.quality)}</span>` : ''}
         ${sizeStr ? `<span class="badge badge-size">${sizeStr}</span>` : ''}
-        ${item.source === 'blob-hook' ? '<span class="badge badge-blob">BLOB</span>' : ''}
-      </div>
-      <div class="item-progress" id="progress-${item.id}" style="display:none">
-        <div class="item-progress-bar" id="progressBar-${item.id}"></div>
+        ${isYtdlp ? `<span class="badge badge-ytdlp">yt-dlp</span>` : ''}
       </div>
     </div>
     <div class="item-actions">
-      <button class="quick-download-btn" data-id="${item.id}" title="Tải nhanh (chất lượng tốt nhất)">
+      <button class="quick-dl-btn" data-id="${item.id}" title="Tải nhanh">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-          <polyline points="7 10 12 15 17 10"/>
-          <line x1="12" y1="15" x2="12" y2="3"/>
+          <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
         </svg>
       </button>
-    </div>
-  `;
-  
-  // Click item = toggle select
-  el.addEventListener('click', (e) => {
-    if (e.target.closest('.quick-download-btn')) return;
+    </div>`;
+
+  el.addEventListener('click', e => {
+    if (e.target.closest('.quick-dl-btn')) return;
     toggleSelect(item.id);
   });
-  
-  // Quick download button
-  el.querySelector('.quick-download-btn').addEventListener('click', (e) => {
+
+  el.querySelector('.quick-dl-btn').addEventListener('click', e => {
     e.stopPropagation();
-    downloadItem(item, { quality: 'best' });
+    downloadItem(item, { quality: $('qualitySelect')?.value || 'best' });
   });
-  
+
   return el;
 }
 
 // ===== SELECTION =====
-
 function toggleSelect(id) {
-  if (selectedIds.has(id)) {
-    selectedIds.delete(id);
-  } else {
-    selectedIds.add(id);
-  }
-  
+  if (selectedIds.has(id)) selectedIds.delete(id);
+  else selectedIds.add(id);
   updateSelectionUI();
 }
 
 function updateSelectionUI() {
   const count = selectedIds.size;
-  selectedCountEl.textContent = `${count} đã chọn`;
-  
-  // Update item classes
+  const el = $('selectedCount');
+  if (el) el.textContent = `${count} đã chọn`;
   document.querySelectorAll('.media-item').forEach(el => {
-    const id = parseFloat(el.dataset.id);
-    el.classList.toggle('selected', selectedIds.has(id));
+    el.classList.toggle('selected', selectedIds.has(parseFloat(el.dataset.id)));
   });
-  
-  // Show/hide download bar
-  downloadBar.style.display = count > 0 ? 'flex' : 'none';
+  const bar = $('downloadBar');
+  if (bar) bar.style.display = count > 0 ? 'flex' : 'none';
 }
 
 // ===== DOWNLOAD =====
-
 async function downloadItem(item, options = {}) {
-  if (!backendOnline) {
-    showToast('❌ Backend chưa chạy! Mở ứng dụng UniversalDL trước.', 'error');
-    return;
-  }
-  
-  // Get current tab URL for context
+  if (!backendOnline) { showToast('❌ Backend chưa chạy!', 'error'); return; }
+
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  
   const payload = {
     ...item,
-    pageUrl: tab?.url || '',
-    quality: options.quality || qualitySelect.value,
+    pageUrl: tab?.url || currentPageUrl,
+    quality: options.quality || $('qualitySelect')?.value || 'best',
+    format: $('formatSelect')?.value || 'mp4',
   };
-  
-  try {
-    chrome.runtime.sendMessage({
-      type: 'DOWNLOAD_REQUEST',
-      item: payload,
-      options,
-    }, (response) => {
-      if (response?.ok) {
-        showToast(`✅ Đã thêm vào hàng đợi tải!`, 'success');
-        // Show progress bar
-        const progressEl = document.getElementById(`progress-${item.id}`);
-        if (progressEl) progressEl.style.display = 'block';
-      } else {
-        showToast(`❌ Lỗi: ${response?.error || 'Không thể kết nối backend'}`, 'error');
-      }
-    });
-  } catch (err) {
-    showToast(`❌ ${err.message}`, 'error');
+
+  // Nếu là yt-dlp entry, dùng page URL thay vì stream URL (để yt-dlp tự lấy)
+  if (item.source === 'ytdlp') {
+    payload.url = currentPageUrl;
   }
+
+  chrome.runtime.sendMessage({ type: 'DOWNLOAD_REQUEST', item: payload, options }, resp => {
+    if (resp?.ok) showToast('✅ Đã thêm vào hàng đợi!', 'success');
+    else showToast(`❌ ${resp?.error || 'Lỗi kết nối'}`, 'error');
+  });
 }
 
 async function downloadSelected() {
   const selected = mediaList.filter(m => selectedIds.has(m.id));
-  if (selected.length === 0) return;
-  
-  downloadBtn.disabled = true;
-  downloadBtn.innerHTML = `<span class="spinner"></span> Đang thêm...`;
-  
+  if (!selected.length) return;
+  const btn = $('downloadBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Đang thêm...'; }
+
   for (const item of selected) {
     await downloadItem(item);
-    await sleep(200); // Tránh spam backend
+    await new Promise(r => setTimeout(r, 150));
   }
-  
   selectedIds.clear();
   updateSelectionUI();
-  
-  downloadBtn.disabled = false;
-  downloadBtn.innerHTML = `
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-      <polyline points="7 10 12 15 17 10"/>
-      <line x1="12" y1="15" x2="12" y2="3"/>
-    </svg>
-    Tải xuống`;
+  if (btn) { btn.disabled = false; btn.textContent = 'Tải xuống'; }
 }
 
 // ===== EVENT LISTENERS =====
-
-// Filter tabs
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    currentFilter = tab.dataset.filter;
-    renderMediaList();
+document.addEventListener('DOMContentLoaded', () => {
+  // Tabs filter
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentFilter = tab.dataset.filter;
+      renderMediaList();
+    });
   });
-});
 
-// Download button
-downloadBtn.addEventListener('click', downloadSelected);
+  $('downloadBtn')?.addEventListener('click', downloadSelected);
 
-// Refresh button
-$('refreshBtn').addEventListener('click', async () => {
-  $('refreshBtn').style.opacity = '0.5';
-  await loadMediaFromBackground();
-  setTimeout(() => { $('refreshBtn').style.opacity = '1'; }, 500);
-});
-
-// Open app button
-$('openAppBtn').addEventListener('click', () => {
-  fetch(`${BACKEND_URL}/api/open-window`, { method: 'POST' }).catch(() => {
-    showToast('Mở ứng dụng UniversalDL từ system tray', 'error');
+  $('refreshBtn')?.addEventListener('click', async () => {
+    const btn = $('refreshBtn');
+    if (btn) btn.style.opacity = '0.4';
+    await loadMedia();
+    if (btn) btn.style.opacity = '1';
   });
-});
 
-// Clear button
-$('clearBtn').addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type: 'CLEAR_MEDIA' }, () => {
-    mediaList = [];
-    selectedIds.clear();
-    updateTabCounts();
-    updateSelectionUI();
-    renderMediaList();
+  $('openAppBtn')?.addEventListener('click', () => {
+    fetch(`${BACKEND_URL}/api/open-window`, { method: 'POST' }).catch(() =>
+      showToast('Mở ứng dụng UniversalDL', 'info')
+    );
   });
+
+  $('clearBtn')?.addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: 'CLEAR_MEDIA' }, () => {
+      mediaList = [];
+      selectedIds.clear();
+      ytdlpChecked = false;
+      updateTabCounts();
+      updateSelectionUI();
+      renderMediaList();
+      updateYtdlpBanner();
+    });
+  });
+
+  $('ytdlpScanBtn')?.addEventListener('click', scanWithYtdlp);
 });
 
-// ===== UTILITIES =====
+// ===== UTILS =====
+function smartTitle(url) {
+  try {
+    const u = new URL(url);
+    // YouTube: lấy v= param
+    if (u.hostname.includes('youtube.com') || u.hostname.includes('youtu.be')) {
+      return 'YouTube Video';
+    }
+    // Lấy tên file từ path
+    const parts = u.pathname.split('/').filter(Boolean);
+    const last = parts[parts.length - 1] || '';
+    const clean = decodeURIComponent(last).replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ');
+    if (clean && clean !== 'watch') return clean;
+    return u.hostname;
+  } catch { return 'Video'; }
+}
 
 function shortenUrl(url) {
   try {
     const u = new URL(url);
-    const path = u.pathname;
-    if (path.length > 40) return '...' + path.slice(-40);
-    return u.hostname + path;
-  } catch {
-    return url.length > 50 ? url.slice(0, 50) + '...' : url;
-  }
+    const p = u.pathname.length > 38 ? '...' + u.pathname.slice(-38) : u.pathname;
+    return u.hostname + p;
+  } catch { return url.length > 50 ? url.slice(0, 50) + '...' : url; }
 }
 
-function extractTitleFromUrl(url) {
-  try {
-    const u = new URL(url);
-    const parts = u.pathname.split('/').filter(Boolean);
-    const last = parts[parts.length - 1] || u.hostname;
-    return decodeURIComponent(last).replace(/[-_]/g, ' ');
-  } catch {
-    return 'Video không rõ tên';
-  }
-}
-
-function formatSize(bytes) {
-  if (bytes === 0) return '';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
+function fmtSize(bytes) {
+  if (!bytes) return '';
+  const k = 1024, s = ['B','KB','MB','GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i];
+  return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + s[i];
 }
 
-function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+function esc(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
-
-let toastTimer;
+let _toastTimer;
 function showToast(msg, type = '') {
-  let toast = document.querySelector('.toast');
-  if (!toast) {
-    toast = document.createElement('div');
-    toast.className = 'toast';
-    document.body.appendChild(toast);
-  }
-  
-  toast.textContent = msg;
-  toast.className = `toast ${type}`;
-  
-  clearTimeout(toastTimer);
+  let el = document.querySelector('.toast');
+  if (!el) { el = document.createElement('div'); el.className = 'toast'; document.body.appendChild(el); }
+  el.textContent = msg;
+  el.className = `toast ${type}`;
+  clearTimeout(_toastTimer);
   requestAnimationFrame(() => {
-    toast.classList.add('show');
-    toastTimer = setTimeout(() => toast.classList.remove('show'), 3000);
+    el.classList.add('show');
+    _toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
   });
 }
 
-// ===== START =====
 init();

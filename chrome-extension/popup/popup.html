@@ -51,6 +51,16 @@
       <span id="statusText">Kết nối backend...</span>
     </div>
 
+    <!-- yt-dlp Scan Banner (hiện khi vào YouTube/TikTok/...) -->
+    <div class="ytdlp-banner" id="ytdlpBanner" style="display:none">
+      <div class="ytdlp-banner-icon">🎬</div>
+      <div class="ytdlp-banner-text">
+        <strong>Trang này hỗ trợ yt-dlp</strong>
+        <span>Click để lấy thông tin video</span>
+      </div>
+      <button class="ytdlp-scan-btn" id="ytdlpScanBtn">🔍 Quét</button>
+    </div>
+
     <!-- Filter Tabs -->
     <div class="filter-tabs">
       <button class="tab active" data-filter="all">
@@ -77,13 +87,13 @@
           </svg>
         </div>
         <p class="empty-title">Chưa phát hiện media nào</p>
-        <p class="empty-desc">Phát video trên trang để UniversalDL tự động phát hiện</p>
+        <p class="empty-desc">Phát video trên trang để UniversalDL tự động phát hiện,<br>hoặc dùng nút <strong>Quét</strong> ở trên cho YouTube/TikTok</p>
       </div>
     </div>
 
-    <!-- Download Options Bar (hiện khi đã chọn) -->
+    <!-- Download Options Bar -->
     <div class="download-bar" id="downloadBar" style="display:none">
-      <div class="quality-select-wrap">
+      <div class="selects-row">
         <select id="qualitySelect" class="quality-select">
           <option value="best">Tốt nhất</option>
           <option value="1080">1080p</option>
@@ -91,6 +101,12 @@
           <option value="480">480p</option>
           <option value="360">360p</option>
           <option value="audio">Chỉ âm thanh (MP3)</option>
+        </select>
+        <select id="formatSelect" class="quality-select">
+          <option value="mp4">MP4</option>
+          <option value="webm">WebM</option>
+          <option value="mkv">MKV</option>
+          <option value="mp3">MP3</option>
         </select>
       </div>
       <button class="download-btn" id="downloadBtn">
