@@ -25,7 +25,7 @@ Chrome Extension  ←──(Phát hiện URL)──→  Go Backend (Wails)  ←�
 
 2. **Vượt tường lửa DNS (Direct DNS Resolver):**
    - Tích hợp bộ phân giải tên miền (DNS Resolver) trực tiếp bằng Go qua DNS công cộng Cloudflare (`1.1.1.1`) và Google (`8.8.8.8`).
-   - Bỏ qua hoàn toàn cấu hình chặn DNS của nhà mạng Việt Nam hoặc file `hosts` của hệ thống để phân tích và tải trực tiếp từ `supjav.com`, `vlxx.moi`... mà không cần bật VPN/1.1.1.1 trên toàn máy.
+   - Bỏ qua hoàn toàn cấu hình chặn DNS của nhà mạng Việt Nam hoặc file `hosts` của hệ thống để phân tích mà không cần bật VPN/1.1.1.1 trên toàn máy.
 
 3. **Thuật toán bóc tách Iframe & Token nâng cao:**
    - Tích hợp pipeline 3 giai đoạn tự động giải mã liên kết, đảo chuỗi mã hóa token `OLID` để trích xuất trực tiếp luồng HLS chất lượng cao nhất từ các trình phát của bên thứ ba.
