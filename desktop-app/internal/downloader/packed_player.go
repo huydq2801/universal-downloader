@@ -233,6 +233,8 @@ func ExtractPackedPlayer(ctx context.Context, pageURL string) (*ExtractResult, e
 		if err != nil {
 			continue
 		}
+		// Lấy URL cuối cùng sau các lần redirect của iframe
+		finalIframeURL := iframeResp.Request.URL.String()
 
 		iframeBytes, err := io.ReadAll(iframeResp.Body)
 		iframeResp.Body.Close()
@@ -262,10 +264,26 @@ func ExtractPackedPlayer(ctx context.Context, pageURL string) (*ExtractResult, e
 
 			unpackedJS := unpackPackerStream(p, radix, count, words)
 			if unpackedJS != "" {
-				// Tìm các liên kết video luồng trực tiếp (.m3u8) trong JS đã giải nén
-				m3u8Re := regexp.MustCompile(`https?://[^\s'"]+\.m3u8[^\s'"]*`)
-				m3u8Matches := m3u8Re.FindAllString(unpackedJS, -1)
-				for _, streamURL := range m3u8Matches {
+				// Tìm các liên kết video (m3u8, txt, mp4,...) ở cả dạng tuyệt đối và tương đối
+				m3u8Re := regexp.MustCompile(`["']((?:https?://[^"']+|/[^"']+)\.(?:m3u8|txt|mp4)[^"']*)["']`)
+				m3u8Matches := m3u8Re.FindAllStringSubmatch(unpackedJS, -1)
+				seenStream := make(map[string]bool)
+				for _, match := range m3u8Matches {
+					streamURL := match[1]
+					if strings.HasPrefix(streamURL, "/") {
+						// Phân giải đường dẫn tương đối dựa trên URL cuối của iframe
+						baseURL, err := url.Parse(finalIframeURL)
+						if err == nil {
+							refURL, err := url.Parse(streamURL)
+							if err == nil {
+								streamURL = baseURL.ResolveReference(refURL).String()
+							}
+						}
+					}
+					if seenStream[streamURL] {
+						continue
+					}
+					seenStream[streamURL] = true
 					hasPacker = true
 					formats = append(formats, AIFormatInfo{
 						Title:   fmt.Sprintf("%s - Server %s (Direct HLS)", title, sv.name),
