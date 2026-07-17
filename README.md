@@ -1,93 +1,95 @@
 # 🚀 UniversalDownloader
 
-> Trình tải đa năng mọi video và media từ bất kỳ trang web nào — kể cả các trang web chặn IP, chặn DNS và chống tải nâng cao.
+> A high-performance, general-purpose media and video downloader designed to fetch streams from any website, bypassing standard network restrictions, firewalls, and advanced stream protection.
 
-## 🛠️ Kiến trúc hệ thống
+## 🛠️ System Architecture
 
 ```
-Chrome Extension  ←──(Phát hiện URL)──→  Go Backend (Wails)  ←──(Song song / Giải mã)──→  File MP4 hoàn chỉnh
-                                                 │
-                                                 └──→  yt-dlp / ffmpeg (Dành cho trang phổ thông)
+Chrome Extension  ──(Network Sniffer)──→  Go Backend (Wails)  ──(Parallel Downloader)──→  Final MP4 File
+                                                  │
+                                                  └──→  yt-dlp / FFmpeg (Standard Platform Fallback)
 ```
 
-- **Chrome Extension**: Bắt các network request (XHR, fetch, m3u8, blob URL) và gửi dữ liệu về ứng dụng desktop.
-- **Go Desktop App**: Quản lý hàng đợi, tự động giải quyết chặn DNS/IP, tải đa luồng song song các phân mảnh video, giải mã ngụy trang tệp ảnh.
-- **yt-dlp + ffmpeg**: Sử dụng làm công cụ bổ trợ tải và ghép các luồng video từ các nền tảng phổ thông (YouTube, TikTok...).
+- **Chrome Extension**: Intercepts media-related network requests (XHR, fetch, m3u8, MPD, blob URLs) and forwards them directly to the desktop app.
+- **Go Desktop App**: Manages the download queue, resolves domain names bypassing local censorship/blocks, downloads HLS segments concurrently, decapsulates masked headers, and packages media streams.
+- **yt-dlp + FFmpeg Integration**: Acts as a fallback engine to download and merge streams from mainstream platforms (YouTube, TikTok, etc.).
 
 ---
 
-## ✨ Tính năng nổi bật mới
+## ✨ Core Features
 
-1. **Bộ tải HLS Go Native (Đa luồng song song & Giải mã PNG):**
-   - **Tải song song 8 phân mảnh (8 Workers):** Đẩy tốc độ tải luồng HLS nhanh gấp 10 lần so với tải tuần tự thông thường, tối ưu hóa tối đa băng thông mạng.
-   - **Tự động hóa giải mã PNG (PNG Decapsulation):** Tự động phát hiện các phân mảnh video bị ngụy trang thành file ảnh PNG (thường gặp trên các nền tảng chia sẻ video lậu). Ứng dụng tự động bóc tách và loại bỏ 941 byte header ảnh giả lập trên luồng bay (on-the-fly) để trả về tệp video chuẩn.
-   - **Tránh bị chặn HTTP 429:** Tự động tối ưu hóa và loại bỏ `Referer` khi yêu cầu các phân mảnh trên Google Drive, khắc phục hoàn toàn lỗi `HTTP 429 Too Many Requests`.
+1. **Go Native HLS Downloader (Multi-threaded & Parallel):**
+   - **Parallel Segment Fetching (8+ Threads)**: Speeds up downloading by pulling up to 8 HLS chunks simultaneously, optimizing network bandwidth utilization.
+   - **PNG Decapsulation (Masked Streams)**: Detects stream segments disguised as PNG image files (a common technique to bypass standard downloading utilities). Automatically strips the mock image headers on-the-fly to reconstruct clean video payloads.
+   - **Rate Limit & Referer Optimization**: Dynamically adjusts headers and strips `Referer` fields when resolving streams hosted on rate-limited CDNs (e.g., Google Drive) to completely eliminate `HTTP 429 Too Many Requests` issues.
 
-2. **Vượt tường lửa DNS (Direct DNS Resolver):**
-   - Tích hợp bộ phân giải tên miền (DNS Resolver) trực tiếp bằng Go qua DNS công cộng Cloudflare (`1.1.1.1`) và Google (`8.8.8.8`).
-   - Bỏ qua hoàn toàn cấu hình chặn DNS của nhà mạng Việt Nam hoặc file `hosts` của hệ thống để phân tích mà không cần bật VPN/1.1.1.1 trên toàn máy.
+2. **Censorship & Firewall Bypass (Direct DNS Resolver):**
+   - Built-in custom dialer bypassing OS-level DNS blockages using secure DNS resolvers (Google `8.8.8.8` & Cloudflare `1.1.1.1`).
+   - Restores connectivity and extracts streams from censored domains without requiring system-wide VPNs or proxy setups.
 
-3. **Thuật toán bóc tách Iframe & Token nâng cao:**
-   - Tích hợp pipeline 3 giai đoạn tự động giải mã liên kết, đảo chuỗi mã hóa token `OLID` để trích xuất trực tiếp luồng HLS chất lượng cao nhất từ các trình phát của bên thứ ba.
+3. **Advanced Playlist Quality Fallback:**
+   - **Bandwidth-based Quality Sorting**: Automatically parses Master HLS playlists and sorts all available stream variants by quality.
+   - **Sequential Fallback Loop**: Attempts to download variants starting from the highest resolution (1080p, 720p, etc.). If a particular CDN variant returns a 404 (due to unrendered streams on the server), the downloader automatically falls back to the next best variant instead of failing.
+   - **Query Parameter Preservation**: Automatically propagates CORS signatures and CDN access tokens (`?token=...`, `?v=...`) to all child playlists and segment URLs.
 
 ---
 
-## 💻 Cài đặt & Sử dụng
+## 💻 Installation & Usage
 
-### Yêu cầu hệ thống
-- **Go**: Phiên bản 1.21 trở lên
-- **Node.js**: Phiên bản 18 trở lên
-- **Wails v2**: Cài đặt thông qua lệnh:
+### Prerequisites
+- **Go**: Version 1.21 or higher
+- **Node.js**: Version 18 or higher
+- **Wails CLI**: Install using Go:
   ```bash
   go install github.com/wailsapp/wails/v2/cmd/wails@latest
   ```
-- **yt-dlp**: Đã được ứng dụng tự động kiểm tra và cấu hình.
-- **ffmpeg**: Đã được ứng dụng tự động kiểm tra và cấu hình.
+- **yt-dlp**: Handled and configured automatically.
+- **FFmpeg**: Handled and configured automatically.
 
-### Biên dịch ứng dụng (Build)
-1. Di chuyển vào thư mục ứng dụng desktop:
+### Compile and Build
+1. Navigate to the desktop application directory:
    ```bash
    cd desktop-app
    ```
-2. Thực hiện build ứng dụng wails:
+2. Build the application:
    ```bash
    wails build -o "UniversalDownloader.exe"
    ```
 
-### Chạy chế độ nhà phát triển (Dev Mode)
+### Development Mode
 ```bash
 cd desktop-app
 wails dev
 ```
 
-### Cài đặt Chrome Extension
-1. Truy cập vào quản lý extension của Chrome: `chrome://extensions/`
-2. Bật góc phải màn hình chế độ **Developer mode**.
-3. Chọn **Load unpacked** và trỏ tới thư mục `chrome-extension/` ở trong mã nguồn dự án.
+### Install Chrome Extension
+1. Open Google Chrome and go to `chrome://extensions/`.
+2. Enable **Developer mode** in the top-right corner.
+3. Click **Load unpacked** and select the `chrome-extension/` directory in the root of the project.
 
 ---
 
-## 📂 Cấu trúc dự án
+## 📂 Project Structure
 
 ```
 universal-downloader/
-├── chrome-extension/     # Chrome Extension (Manifest V3) để bắt link tự động
-│   ├── background/       # Service Worker lắng nghe network request
-│   ├── content/          # Content Scripts hook các API blob/fetch/XHR
-│   └── popup/            # Giao diện tiện ích nhỏ để gửi link về ứng dụng
-└── desktop-app/          # Wails Desktop App (Go + Svelte/JS Frontend)
-    ├── app.go            # Cầu nối (Binding) Wails API, giải mã & vượt chặn DNS
+├── chrome-extension/     # Chrome Extension (Manifest V3) for network sniffing
+│   ├── background/       # Service worker listening to network requests
+│   ├── content/          # Content scripts hooking blob/fetch APIs
+│   └── popup/            # Extension UI for manually sending links to desktop app
+└── desktop-app/          # Wails Desktop App (Go + JS Frontend)
+    ├── app.go            # Wails binding interface & bridge controller
     ├── internal/
-    │   ├── server/       # API Server nội bộ đón nhận yêu cầu từ Extension
-    │   ├── downloader/   # Engine tải video: yt-dlp, ffmpeg và Custom HLS Downloader
-    │   │   ├── engine.go       # Bộ định tuyến luồng tải video
-    │   │   └── custom_hls.go   # Bộ tải đa luồng song song, giải mã ngụy trang PNG
-    │   ├── queue/        # Quản lý hàng đợi tải xuống
-    │   └── storage/      # Cơ sở dữ liệu SQLite cục bộ (lưu lịch sử tải)
-    └── frontend/         # Giao diện người dùng Dashboard UI sang trọng, hiện đại
+    │   ├── server/       # Local API server receiving payloads from extension
+    │   ├── downloader/   # Media download engine: yt-dlp, FFmpeg, and Custom HLS
+    │   │   ├── engine.go       # Downloader routing controller
+    │   │   └── custom_hls.go   # Parallel segment downloader & decapsulator
+    │   ├── queue/        # Thread-safe download queue manager
+    │   └── storage/      # Local SQLite database (GORM) for download history
+    └── frontend/         # Sleek, modern responsive UI dashboard
 ```
 
 ---
 
-## 📝 Bản quyền & Tuyên bố miễn trừ
-Dự án được phân phối theo giấy phép MIT. Chỉ sử dụng phần mềm này để tải các tài nguyên mà bạn có quyền sở hữu hoặc được phép tải hợp pháp. Tác giả không chịu bất kỳ trách nhiệm nào đối với hành vi sử dụng sai mục đích.
+## 📝 License & Disclaimer
+This project is distributed under the MIT License. Use this software only for downloading media assets that you own or have legal authorization to download. The authors are not responsible for any misuse of the application.

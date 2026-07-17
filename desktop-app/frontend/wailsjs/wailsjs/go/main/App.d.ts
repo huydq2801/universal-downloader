@@ -12,6 +12,8 @@ export function CancelDownload(arg1:string):Promise<void>;
 
 export function CheckTools():Promise<Record<string, boolean>>;
 
+export function ClearHistory():Promise<void>;
+
 export function GetDownloadList():Promise<Array<storage.DownloadRecord>>;
 
 export function GetInfo(arg1:string):Promise<downloader.MediaInfo>;

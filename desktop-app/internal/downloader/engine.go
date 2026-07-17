@@ -63,14 +63,21 @@ type Engine struct {
 	toolsDir string
 	ytdlp    string
 	ffmpeg   string
+	threads  int
 }
 
 // NewEngine tạo Engine mới
 func NewEngine(toolsDir string) *Engine {
-	e := &Engine{toolsDir: toolsDir}
+	e := &Engine{toolsDir: toolsDir, threads: 8}
 	e.ytdlp = e.findTool("yt-dlp")
 	e.ffmpeg = e.findTool("ffmpeg")
 	return e
+}
+
+func (e *Engine) SetThreads(threads int) {
+	if threads > 0 {
+		e.threads = threads
+	}
 }
 
 func (e *Engine) ToolsDir() string { return e.toolsDir }
@@ -244,15 +251,44 @@ func (e *Engine) Download(ctx context.Context, req DownloadRequest, savePath str
 		return e.runYtdlp(ctx, req, downloadURL, savePath, onProgress)
 	}
 
+	// Case 0: URL là HLS stream từ CDN Javplayer đã hết hạn (wowstream2.cloud, v.v.)
+	// → tái-lấy URL stream mới bằng cách extract videoID từ URL, sau đó gọi lại Javplayer API
+	if isJavplayerExpiredURL(req.URL) {
+		if onProgress != nil {
+			onProgress(0, "", "", "refreshing stream URL...")
+		}
+		refreshed := false
+
+		// Bước 1: Thử extract videoID trực tiếp từ URL CDN wowstream (nhanh nhất, không cần pageURL)
+		videoID := extractVideoIDFromWowstreamURL(req.URL)
+		if videoID != "" {
+			freshURL, err := e.fetchJavplayerStreamURL(ctx, videoID)
+			if err == nil && freshURL != "" {
+				req.URL = freshURL
+				downloadURL = freshURL
+				refreshed = true
+			}
+		}
+
+		// Bước 2: Nếu không extract được từ URL, thử tải lại HTML từ pageURL
+		if !refreshed && req.PageURL != "" && isJavplayerPage(req.PageURL) {
+			freshURL, err := e.RefreshJavplayerURL(ctx, req.PageURL)
+			if err == nil && freshURL != "" {
+				req.URL = freshURL
+				downloadURL = freshURL
+			}
+		}
+	}
+
 	// Case 3: URL là HLS/DASH/VL stream → dùng custom Go downloader (nhanh, chính xác, giải mã PNG tự động)
 	if req.Type == "hls" || req.Type == "dash" || req.Type == "m3u8" || isHLSStreamURL(req.URL) {
 		return e.downloadHLSWithGo(ctx, req, savePath, onProgress)
 	}
 
 	// Case 4: URL là file media trực tiếp từ trang không được hỗ trợ bởi yt-dlp
-	// → thử direct HTTP download trước
+	// → thử direct HTTP download trước (đa luồng song song)
 	if isDirectMediaURL(req.URL) {
-		err := e.directDownload(ctx, req, savePath, onProgress)
+		err := e.downloadParallel(ctx, req, savePath, e.threads, onProgress)
 		if err == nil {
 			return nil
 		}
@@ -270,7 +306,7 @@ func (e *Engine) Download(ctx context.Context, req DownloadRequest, savePath str
 		if onProgress != nil {
 			onProgress(0, "", "", "fallback to direct download")
 		}
-		return e.directDownload(ctx, req, savePath, onProgress)
+		return e.downloadParallel(ctx, req, savePath, e.threads, onProgress)
 	}
 	return nil
 }

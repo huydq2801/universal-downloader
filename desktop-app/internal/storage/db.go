@@ -38,17 +38,18 @@ type DownloadRecord struct {
 
 // Settings lưu cấu hình app
 type Settings struct {
-	ID             uint   `gorm:"primaryKey" json:"-"`
-	SaveDirectory  string `json:"saveDirectory"`
-	DefaultQuality string `json:"defaultQuality"`
-	DefaultFormat  string `json:"defaultFormat"`
-	MaxConcurrent  int    `json:"maxConcurrent"`
-	YtdlpPath      string `json:"ytdlpPath"`
-	FfmpegPath     string `json:"ffmpegPath"`
-	AutoOpenFolder bool   `json:"autoOpenFolder"`
-	Theme          string `json:"theme"`
-	GeminiAPIKey   string `json:"geminiAPIKey"`
-	GeminiModel    string `json:"geminiModel"`
+	ID              uint   `gorm:"primaryKey" json:"-"`
+	SaveDirectory   string `json:"saveDirectory"`
+	DefaultQuality  string `json:"defaultQuality"`
+	DefaultFormat   string `json:"defaultFormat"`
+	MaxConcurrent   int    `json:"maxConcurrent"`
+	DownloadThreads int    `json:"downloadThreads"`
+	YtdlpPath       string `json:"ytdlpPath"`
+	FfmpegPath      string `json:"ffmpegPath"`
+	AutoOpenFolder  bool   `json:"autoOpenFolder"`
+	Theme           string `json:"theme"`
+	GeminiAPIKey    string `json:"geminiAPIKey"`
+	GeminiModel     string `json:"geminiModel"`
 }
 
 // NewDatabase khởi tạo SQLite database
@@ -139,14 +140,15 @@ func (d *Database) GetSettings() (*Settings, error) {
 		// Tạo settings mặc định
 		homeDir := getDefaultDownloadDir()
 		settings = Settings{
-			SaveDirectory:  homeDir,
-			DefaultQuality: "best",
-			DefaultFormat:  "mp4",
-			MaxConcurrent:  3,
-			YtdlpPath:      "yt-dlp",
-			FfmpegPath:     "ffmpeg",
-			AutoOpenFolder: false,
-			Theme:          "dark",
+			SaveDirectory:   homeDir,
+			DefaultQuality:  "best",
+			DefaultFormat:   "mp4",
+			MaxConcurrent:   3,
+			DownloadThreads: 8,
+			YtdlpPath:       "yt-dlp",
+			FfmpegPath:      "ffmpeg",
+			AutoOpenFolder:  false,
+			Theme:           "dark",
 		}
 		if err := d.db.Create(&settings).Error; err != nil {
 			return nil, err

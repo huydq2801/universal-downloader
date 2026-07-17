@@ -3,16 +3,22 @@ package downloader
 import (
 	"bufio"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -50,11 +56,7 @@ func (e *Engine) downloadHLSWithGo(ctx context.Context, req DownloadRequest, sav
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		u, err := url.Parse(line)
-		if err != nil {
-			continue
-		}
-		segments = append(segments, baseParsed.ResolveReference(u).String())
+		segments = append(segments, resolveURLWithQuery(baseParsed, line))
 	}
 
 	totalSegs := len(segments)
@@ -62,36 +64,39 @@ func (e *Engine) downloadHLSWithGo(ctx context.Context, req DownloadRequest, sav
 		return fmt.Errorf("không tìm thấy segment nào trong playlist")
 	}
 
-	// 4. Create temporary folder for segment parts
-	tempDir := filepath.Join(savePath, fmt.Sprintf(".tmp_%s_%d", fileName, time.Now().Unix()))
+	// 4. Create temporary folder for segment parts (MD5-hashed based on resolved playlist URL)
+	hasher := md5.New()
+	hasher.Write([]byte(mediaPlaylistURL))
+	tempDirName := fmt.Sprintf(".tmp_hls_%s", hex.EncodeToString(hasher.Sum(nil)))
+	tempDir := filepath.Join(savePath, tempDirName)
 	if err := os.MkdirAll(tempDir, 0755); err != nil {
 		return fmt.Errorf("không thể tạo thư mục tạm: %v", err)
 	}
-	defer os.RemoveAll(tempDir)
+	
+	// Only remove temporary directory on successful download completion
+	downloadSuccess := false
+	defer func() {
+		if downloadSuccess {
+			os.RemoveAll(tempDir)
+		}
+	}()
 
-	// Configure client with custom DNS resolver
-	dialer := &net.Dialer{
-		Resolver: &net.Resolver{
-			PreferGo: true,
-			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				d := net.Dialer{Timeout: 4 * time.Second}
-				conn, err := d.DialContext(ctx, "udp", "1.1.1.1:53")
-				if err == nil {
-					return conn, nil
-				}
-				return d.DialContext(ctx, "udp", "8.8.8.8:53")
-			},
-		},
-	}
+	// Configure client with DPI bypass resolver
+	dialer := NewDPIBypassDialer()
 	client := &http.Client{
 		Transport: &http.Transport{
-			DialContext: dialer.DialContext,
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return DPIBypassDialContext(ctx, dialer, network, addr)
+			},
 		},
 		Timeout: 30 * time.Second,
 	}
 
 	// Start concurrent worker pool
-	numWorkers := 8 // Tải song song 8 luồng để tăng tốc độ gấp 8 lần
+	numWorkers := e.threads
+	if numWorkers <= 0 {
+		numWorkers = 8
+	}
 	jobsChan := make(chan segmentJob, totalSegs)
 	for i, segURL := range segments {
 		jobsChan <- segmentJob{index: i, url: segURL}
@@ -116,7 +121,19 @@ func (e *Engine) downloadHLSWithGo(ctx context.Context, req DownloadRequest, sav
 				}
 
 				partPath := filepath.Join(tempDir, fmt.Sprintf("%05d.ts", job.index))
-				err := e.downloadSegmentToFile(workerCtx, client, job.url, req.PageURL, partPath, 3)
+				
+				// HLS Resume Check: Skip downloading if segment already exists and is valid size
+				stat, err := os.Stat(partPath)
+				if err == nil && stat.Size() > 1000 {
+					count := atomic.AddInt64(&downloadedCount, 1)
+					if onProgress != nil {
+						pct := float64(count) / float64(totalSegs) * 100
+						onProgress(pct, "", "", "downloading")
+					}
+					continue
+				}
+
+				err = e.downloadSegmentToFile(workerCtx, client, job.url, req.PageURL, partPath, 3)
 				if err != nil {
 					errOnce.Do(func() {
 						workerErr = err
@@ -140,27 +157,66 @@ func (e *Engine) downloadHLSWithGo(ctx context.Context, req DownloadRequest, sav
 		return fmt.Errorf("lỗi tải song song: %v", workerErr)
 	}
 
-	// 5. Merge all files into final output file sequentially
-	outFile, err := os.Create(outPath)
+	// 5. Merge all segment files into a single temporary .ts file
+	tempTSPath := filepath.Join(tempDir, "merged_temp.ts")
+	tempTSFile, err := os.Create(tempTSPath)
 	if err != nil {
-		return fmt.Errorf("không thể tạo file đầu ra: %v", err)
+		return fmt.Errorf("không thể tạo tệp TS tạm thời: %v", err)
 	}
-	defer outFile.Close()
-
+	
 	if onProgress != nil {
-		onProgress(99.9, "", "", "stitching")
+		onProgress(99.0, "", "", "stitching")
 	}
 
 	for i := 0; i < totalSegs; i++ {
 		partPath := filepath.Join(tempDir, fmt.Sprintf("%05d.ts", i))
 		partFile, err := os.Open(partPath)
 		if err != nil {
+			tempTSFile.Close()
 			return fmt.Errorf("lỗi mở tệp phân mảnh %d: %v", i, err)
 		}
-		_, err = io.Copy(outFile, partFile)
+		_, err = io.Copy(tempTSFile, partFile)
 		partFile.Close()
 		if err != nil {
+			tempTSFile.Close()
 			return fmt.Errorf("lỗi ghép tệp phân mảnh %d: %v", i, err)
+		}
+	}
+	tempTSFile.Close()
+
+	// 6. Remux the merged .ts file to a proper .mp4 container using ffmpeg
+	if onProgress != nil {
+		onProgress(99.5, "", "", "remuxing")
+	}
+
+	ffmpegExecutable := e.ffmpeg
+	if ffmpegExecutable == "" {
+		ffmpegExecutable = "ffmpeg"
+	}
+
+	cmd := exec.CommandContext(ctx, ffmpegExecutable, "-y", "-i", tempTSPath, "-c", "copy", outPath)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+
+	if err := cmd.Run(); err != nil {
+		// Fallback: If ffmpeg fails, just rename/copy the merged .ts file to outPath
+		if onProgress != nil {
+			onProgress(99.8, "", "", "stitching (fallback)")
+		}
+		
+		srcFile, srcErr := os.Open(tempTSPath)
+		if srcErr != nil {
+			return fmt.Errorf("ffmpeg lỗi và không thể mở tệp TS để sao chép: %v (lỗi ffmpeg: %v)", srcErr, err)
+		}
+		defer srcFile.Close()
+
+		destFile, destErr := os.Create(outPath)
+		if destErr != nil {
+			return fmt.Errorf("ffmpeg lỗi và không thể tạo tệp đầu ra: %v (lỗi ffmpeg: %v)", destErr, err)
+		}
+		defer destFile.Close()
+
+		if _, copyErr := io.Copy(destFile, srcFile); copyErr != nil {
+			return fmt.Errorf("ffmpeg lỗi và sao chép phân mảnh thất bại: %v (lỗi ffmpeg: %v)", copyErr, err)
 		}
 	}
 
@@ -168,10 +224,18 @@ func (e *Engine) downloadHLSWithGo(ctx context.Context, req DownloadRequest, sav
 		onProgress(100.0, "", "", "completed")
 	}
 
+	downloadSuccess = true
 	return nil
 }
 
 func (e *Engine) resolveMediaPlaylist(ctx context.Context, playlistURL, referer string) (string, error) {
+	if (strings.Contains(playlistURL, "/api/") || strings.Contains(playlistURL, "/source/")) && !strings.Contains(playlistURL, ".m3u8") {
+		resolvedURL, err := e.resolveAPISourceURL(ctx, playlistURL, referer)
+		if err == nil && resolvedURL != "" {
+			playlistURL = resolvedURL
+		}
+	}
+
 	lines, err := e.fetchPlaylistLines(ctx, playlistURL, referer)
 	if err != nil {
 		return "", err
@@ -179,47 +243,126 @@ func (e *Engine) resolveMediaPlaylist(ctx context.Context, playlistURL, referer 
 
 	baseParsed, _ := url.Parse(playlistURL)
 	isMaster := false
-	var variantURLs []string
+
+	type hlsVariant struct {
+		url       string
+		bandwidth int
+	}
+	var variants []hlsVariant
+
+	var currentBandwidth int
+	bandwidthRe := regexp.MustCompile(`BANDWIDTH=(\d+)`)
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "#EXT-X-STREAM-INF") {
 			isMaster = true
+			currentBandwidth = 0
+			if m := bandwidthRe.FindStringSubmatch(line); len(m) > 1 {
+				fmt.Sscanf(m[1], "%d", &currentBandwidth)
+			}
 			continue
 		}
 		if line != "" && !strings.HasPrefix(line, "#") {
-			u, err := url.Parse(line)
-			if err == nil {
-				variantURLs = append(variantURLs, baseParsed.ResolveReference(u).String())
-			}
+			resolved := resolveURLWithQuery(baseParsed, line)
+			variants = append(variants, hlsVariant{
+				url:       resolved,
+				bandwidth: currentBandwidth,
+			})
 		}
 	}
 
-	if isMaster && len(variantURLs) > 0 {
-		bestVariant := variantURLs[len(variantURLs)-1]
-		return e.resolveMediaPlaylist(ctx, bestVariant, referer)
+	if isMaster && len(variants) > 0 {
+		// Sort variants by bandwidth descending (highest quality first)
+		sort.Slice(variants, func(i, j int) bool {
+			return variants[i].bandwidth > variants[j].bandwidth
+		})
+
+		var lastErr error
+		for _, v := range variants {
+			fmt.Printf("[DEBUG] resolveMediaPlaylist trying variant (bandwidth: %d): %s\n", v.bandwidth, v.url)
+			resolvedURL, err := e.resolveMediaPlaylist(ctx, v.url, referer)
+			if err == nil && resolvedURL != "" {
+				return resolvedURL, nil
+			}
+			lastErr = err
+			fmt.Printf("[DEBUG] resolveMediaPlaylist variant failed: %v\n", err)
+		}
+		if lastErr != nil {
+			return "", lastErr
+		}
+		return "", fmt.Errorf("không có variant nào hợp lệ trong playlist")
 	}
 
 	return playlistURL, nil
 }
 
-func (e *Engine) fetchPlaylistLines(ctx context.Context, playlistURL, referer string) ([]string, error) {
-	dialer := &net.Dialer{
-		Resolver: &net.Resolver{
-			PreferGo: true,
-			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				d := net.Dialer{Timeout: 4 * time.Second}
-				conn, err := d.DialContext(ctx, "udp", "1.1.1.1:53")
-				if err == nil {
-					return conn, nil
-				}
-				return d.DialContext(ctx, "udp", "8.8.8.8:53")
-			},
-		},
-	}
+// resolveAPISourceURL sends a POST request to api sources to extract the real stream link
+func (e *Engine) resolveAPISourceURL(ctx context.Context, apiURL, referer string) (string, error) {
+	dialer := NewDPIBypassDialer()
 	client := &http.Client{
 		Transport: &http.Transport{
-			DialContext: dialer.DialContext,
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return DPIBypassDialContext(ctx, dialer, network, addr)
+			},
+		},
+		Timeout: 10 * time.Second,
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+		req.Header.Set("Origin", extractOrigin(referer))
+	}
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("API HTTP %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	bodyStr := string(bodyBytes)
+	
+	// Scan JSON for any URL ending with .m3u8
+	m3u8Re := regexp.MustCompile(`https?://[^\s"'<>\\#]+?\.m3u8[^\s"'<>\\#]*`)
+	match := m3u8Re.FindString(bodyStr)
+	if match != "" {
+		match = strings.ReplaceAll(match, "\\/", "/")
+		return match, nil
+	}
+
+	// Fallback to any MP4/direct link
+	mp4Re := regexp.MustCompile(`https?://[^\s"'<>\\#]+?\.(?:mp4|webm|vl)[^\s"'<>\\#]*`)
+	match = mp4Re.FindString(bodyStr)
+	if match != "" {
+		match = strings.ReplaceAll(match, "\\/", "/")
+		return match, nil
+	}
+
+	return "", fmt.Errorf("không tìm thấy link stream trong API response")
+}
+
+func (e *Engine) fetchPlaylistLines(ctx context.Context, playlistURL, referer string) ([]string, error) {
+	dialer := NewDPIBypassDialer()
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return DPIBypassDialContext(ctx, dialer, network, addr)
+			},
 		},
 		Timeout: 10 * time.Second,
 	}
@@ -317,4 +460,17 @@ func (e *Engine) downloadSegmentToFile(ctx context.Context, client *http.Client,
 		return nil // Success
 	}
 	return fmt.Errorf("sau %d lần thử: %v", retries, lastErr)
+}
+
+func resolveURLWithQuery(base *url.URL, refStr string) string {
+	ref, err := url.Parse(refStr)
+	if err != nil {
+		return refStr
+	}
+	resolved := base.ResolveReference(ref)
+	// Copy query parameters from base URL if resolved URL has none
+	if resolved.RawQuery == "" && base.RawQuery != "" {
+		resolved.RawQuery = base.RawQuery
+	}
+	return resolved.String()
 }

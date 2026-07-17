@@ -73,10 +73,16 @@ func (a *App) shutdown(ctx context.Context) {
 
 // ===== WAILS BINDINGS — Các hàm có thể gọi từ JS frontend =====
 
-// GetDownloadList trả về danh sách download hiện tại
+// GetDownloadList trả về danh sách lịch sử download (chỉ lấy các mục đã kết thúc)
 func (a *App) GetDownloadList() []storage.DownloadRecord {
 	records, _ := a.db.GetRecentDownloads(100)
-	return records
+	var history []storage.DownloadRecord
+	for _, r := range records {
+		if r.Status == "completed" || r.Status == "failed" || r.Status == "cancelled" {
+			history = append(history, r)
+		}
+	}
+	return history
 }
 
 // GetQueueItems trả về items đang trong queue
@@ -126,6 +132,11 @@ func (a *App) SelectFolder() (string, error) {
 	})
 }
 
+// ClearHistory xóa toàn bộ lịch sử tải xuống (completed, failed, cancelled)
+func (a *App) ClearHistory() error {
+	return a.db.ClearHistory()
+}
+
 // GetInfo lấy thông tin media từ URL (dùng yt-dlp --dump-json)
 func (a *App) GetInfo(url string) (*downloader.MediaInfo, error) {
 	engine := downloader.NewEngine(getToolsDir())
@@ -149,24 +160,12 @@ func (a *App) fetchHTML(ctx context.Context, targetURL, referer string) (string,
 		req.Header.Set("Referer", referer)
 	}
 
-	// Sử dụng DNS công cộng (Cloudflare 1.1.1.1 và Google 8.8.8.8) để tránh bị nhà mạng chặn DNS
-	dialer := &net.Dialer{
-		Resolver: &net.Resolver{
-			PreferGo: true,
-			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				d := net.Dialer{Timeout: 4 * time.Second}
-				conn, err := d.DialContext(ctx, "udp", "1.1.1.1:53")
-				if err == nil {
-					return conn, nil
-				}
-				return d.DialContext(ctx, "udp", "8.8.8.8:53")
-			},
-		},
-	}
-
+	dialer := downloader.NewDPIBypassDialer()
 	client := &http.Client{
 		Transport: &http.Transport{
-			DialContext: dialer.DialContext,
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return downloader.DPIBypassDialContext(ctx, dialer, network, addr)
+			},
 		},
 		Timeout: 15 * time.Second,
 	}
@@ -205,23 +204,12 @@ func (a *App) fetchAjaxPlayer(ctx context.Context, ajaxURL, id, server, referer 
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	req.Header.Set("Referer", referer)
 
-	dialer := &net.Dialer{
-		Resolver: &net.Resolver{
-			PreferGo: true,
-			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-				d := net.Dialer{Timeout: 4 * time.Second}
-				conn, err := d.DialContext(ctx, "udp", "1.1.1.1:53")
-				if err == nil {
-					return conn, nil
-				}
-				return d.DialContext(ctx, "udp", "8.8.8.8:53")
-			},
-		},
-	}
-
+	dialer := downloader.NewDPIBypassDialer()
 	client := &http.Client{
 		Transport: &http.Transport{
-			DialContext: dialer.DialContext,
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return downloader.DPIBypassDialContext(ctx, dialer, network, addr)
+			},
 		},
 		Timeout: 10 * time.Second,
 	}
@@ -416,6 +404,58 @@ func (a *App) AnalyzeWithAI(pageURL string) (*downloader.ExtractResult, error) {
 	title, thumb := getTitleAndThumb(mainHTML)
 
 	var allFormats []downloader.AIFormatInfo
+
+	// --- Bước 00: Phát hiện trang sử dụng javplayer.cc (ví dụ 123av.com) ---
+	if strings.Contains(mainHTML, "javplayer.cc") {
+		runtime.LogInfof(a.ctx, "Extractor: Phát hiện javplayer.cc, đang trích xuất videoID...")
+		videoID := downloader.ExtractJavplayerVideoID(mainHTML)
+		runtime.LogInfof(a.ctx, "Extractor: videoID = %q", videoID)
+		if videoID != "" {
+			streamAPIURL := fmt.Sprintf("https://javplayer.cc/stream?id=%s", videoID)
+			iframeURL := fmt.Sprintf("https://javplayer.cc/e/%s", videoID)
+			apiReq, err := http.NewRequestWithContext(ctx, "GET", streamAPIURL, nil)
+			if err == nil {
+				apiReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+				apiReq.Header.Set("Referer", iframeURL)
+				apiReq.Header.Set("Origin", "https://javplayer.cc")
+				dialer := downloader.NewDPIBypassDialer()
+				apiClient := &http.Client{
+					Transport: &http.Transport{
+						DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+							return downloader.DPIBypassDialContext(ctx, dialer, network, addr)
+						},
+					},
+					Timeout: 15 * time.Second,
+				}
+				resp, err := apiClient.Do(apiReq)
+				if err == nil {
+					defer resp.Body.Close()
+					if resp.StatusCode == http.StatusOK {
+						var res struct {
+							Media struct {
+								Stream string `json:"stream"`
+							} `json:"media"`
+						}
+						bodyBytes, _ := io.ReadAll(resp.Body)
+						if json.Unmarshal(bodyBytes, &res) == nil && res.Media.Stream != "" {
+							runtime.LogInfof(a.ctx, "Extractor: Trích xuất thành công m3u8 từ javplayer.cc: %s", res.Media.Stream)
+							allFormats = append(allFormats, downloader.AIFormatInfo{
+								Title:   "HLS Stream (Javplayer)",
+								URL:     res.Media.Stream,
+								Quality: "Tự động",
+								Ext:     "m3u8",
+							})
+						}
+					} else {
+						runtime.LogErrorf(a.ctx, "Extractor: Javplayer API trả về HTTP %d cho videoID=%q", resp.StatusCode, videoID)
+					}
+				} else {
+					runtime.LogErrorf(a.ctx, "Extractor: Lỗi gọi Javplayer API: %v", err)
+				}
+			}
+		}
+	}
+
 
 	// --- Bước 0: Phát hiện trang supjav.com ---
 	if strings.Contains(strings.ToLower(pageURL), "supjav.com") {

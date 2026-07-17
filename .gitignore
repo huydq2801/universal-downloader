@@ -42,3 +42,7 @@ downloads/
 # Environment
 .env
 .env.local
+
+# Scratch files
+/desktop-app/scratch/
+

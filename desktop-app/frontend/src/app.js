@@ -101,6 +101,16 @@ function renderQueue() {
   // Xóa items cũ
   listEl.querySelectorAll('.dl-card').forEach(el => el.remove());
   
+  // Update badge
+  const activeCount = queueItems.filter(i => i.status === 'downloading' || i.status === 'pending').length;
+  const badge = document.getElementById('queueBadge');
+  if (activeCount > 0) {
+    badge.style.display = 'block';
+    badge.textContent = activeCount;
+  } else {
+    badge.style.display = 'none';
+  }
+  
   if (queueItems.length === 0) {
     emptyEl.style.display = 'flex';
     return;
@@ -117,16 +127,6 @@ function renderQueue() {
   for (const item of sorted) {
     const card = createDownloadCard(item);
     listEl.appendChild(card);
-  }
-  
-  // Update badge
-  const activeCount = queueItems.filter(i => i.status === 'downloading' || i.status === 'pending').length;
-  const badge = document.getElementById('queueBadge');
-  if (activeCount > 0) {
-    badge.style.display = 'block';
-    badge.textContent = activeCount;
-  } else {
-    badge.style.display = 'none';
   }
 }
 
@@ -355,15 +355,7 @@ document.getElementById('clearHistoryBtn')?.addEventListener('click', async () =
   if (!confirm('Xóa toàn bộ lịch sử tải?')) return;
   try {
     if (window.go?.main?.App) {
-      // Hãy gọi API xóa lịch sử thông qua DB ở Backend. 
-      // Đợi đã, Wails app.go không có binding trực tiếp cho ClearHistory, nhưng chúng ta có thể gọi qua db.
-      // Để xem app.go có binding gì cho việc này không... 
-      // Không có, nhưng DB của Wails là SQLite. Hãy kiểm tra nếu có API nào hoặc ta sẽ thêm một binding cho ClearHistory.
-      // Hoặc ta có thể add một method ClearHistory() trong app.go.
-      // Hãy tạm thời gọi RemoveDownload cho từng record trong historyItems để xóa sạch.
-      for (const item of historyItems) {
-        await window.go.main.App.RemoveDownload(item.id);
-      }
+      await window.go.main.App.ClearHistory();
       showToast('Đã xóa lịch sử', 'success');
       loadHistory();
     }
@@ -387,6 +379,7 @@ async function loadSettings() {
   document.getElementById('defaultQuality').value = settings.defaultQuality || 'best';
   document.getElementById('defaultFormat').value = settings.defaultFormat || 'mp4';
   document.getElementById('maxConcurrent').value = settings.maxConcurrent || 3;
+  document.getElementById('downloadThreads').value = settings.downloadThreads || 8;
   document.getElementById('ytdlpPath').value = settings.ytdlpPath || '';
   document.getElementById('ffmpegPath').value = settings.ffmpegPath || '';
   document.getElementById('geminiAPIKey').value = settings.geminiAPIKey || '';
@@ -399,6 +392,7 @@ document.getElementById('saveSettingsBtn')?.addEventListener('click', async () =
     defaultQuality: document.getElementById('defaultQuality').value,
     defaultFormat: document.getElementById('defaultFormat').value,
     maxConcurrent: parseInt(document.getElementById('maxConcurrent').value) || 3,
+    downloadThreads: parseInt(document.getElementById('downloadThreads').value) || 8,
     ytdlpPath: document.getElementById('ytdlpPath').value,
     ffmpegPath: document.getElementById('ffmpegPath').value,
     geminiAPIKey: document.getElementById('geminiAPIKey').value.trim(),

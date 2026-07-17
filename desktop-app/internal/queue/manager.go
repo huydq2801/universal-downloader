@@ -264,6 +264,9 @@ func (m *Manager) processDownload(id string) {
 	// Tạo engine riêng cho luồng tải này để tránh race condition và áp dụng custom paths
 	engine := downloader.NewEngine(m.engine.ToolsDir())
 	engine.SetPaths(ytdlpPath, ffmpegPath)
+	if settings != nil {
+		engine.SetThreads(settings.DownloadThreads)
+	}
 
 	// Bắt đầu download
 	err := engine.Download(ctx, item.Request, savePath, func(progress float64, speed, eta, status string) {

@@ -18,6 +18,10 @@ export function CheckTools() {
   return window['go']['main']['App']['CheckTools']();
 }
 
+export function ClearHistory() {
+  return window['go']['main']['App']['ClearHistory']();
+}
+
 export function GetDownloadList() {
   return window['go']['main']['App']['GetDownloadList']();
 }

@@ -289,6 +289,7 @@ export namespace storage {
 	    defaultQuality: string;
 	    defaultFormat: string;
 	    maxConcurrent: number;
+	    downloadThreads: number;
 	    ytdlpPath: string;
 	    ffmpegPath: string;
 	    autoOpenFolder: boolean;
@@ -306,6 +307,7 @@ export namespace storage {
 	        this.defaultQuality = source["defaultQuality"];
 	        this.defaultFormat = source["defaultFormat"];
 	        this.maxConcurrent = source["maxConcurrent"];
+	        this.downloadThreads = source["downloadThreads"];
 	        this.ytdlpPath = source["ytdlpPath"];
 	        this.ffmpegPath = source["ffmpegPath"];
 	        this.autoOpenFolder = source["autoOpenFolder"];
