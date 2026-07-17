@@ -328,15 +328,8 @@ func ExtractPackedPlayer(ctx context.Context, pageURL string) (*ExtractResult, e
 						Ext:     "mp4",
 					})
 				}
-			} else {
-				// Nếu là các server host khác như Streamtape, DoodStream, upn.one,... ta liệt kê đường dẫn iframe để user tải gián tiếp
-				formats = append(formats, AIFormatInfo{
-					Title:   fmt.Sprintf("[Iframe] %s - Server %s", title, sv.name),
-					URL:     iframeURL,
-					Quality: fmt.Sprintf("Mirror %s", sv.name),
-					Ext:     "html",
-				})
 			}
+			// Bỏ qua các liên kết HTML gián tiếp (.html) để tránh việc tải xuống mã nguồn quảng cáo độc hại khiến Windows Defender báo virus/Trojan.
 		}
 	}
 
