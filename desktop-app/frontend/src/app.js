@@ -337,10 +337,34 @@ function renderHistory() {
           </div>
         </div>
         <div class="dl-actions">
-          ${record.status === 'completed' ? `<button class="action-btn btn-open-folder" title="Mở thư mục">📁</button>` : ''}
+          ${record.status === 'completed' ? `
+            <button class="action-btn btn-retry-dl" title="Tải lại" style="margin-right: 6px;">🔄</button>
+            <button class="action-btn btn-open-folder" title="Mở thư mục">📁</button>
+          ` : ''}
         </div>
       </div>
     `;
+
+    card.querySelector('.btn-retry-dl')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const req = {
+        url: record.url,
+        pageUrl: record.pageUrl,
+        title: record.title,
+        type: record.type,
+        quality: record.quality || 'best',
+        format: record.format || 'mp4',
+        savePath: record.savePath,
+      };
+      try {
+        if (window.go?.main?.App) {
+          await window.go.main.App.AddDownload(req);
+          showToast('Đã thêm lại vào hàng đợi tải xuống!', 'success');
+        }
+      } catch (err) {
+        showToast('Lỗi: ' + (err.message || err), 'error');
+      }
+    });
 
     card.querySelector('.btn-open-folder')?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -524,9 +548,6 @@ function setupUrlDownloader() {
     });
   }
 }
-
-// ===== RENDER KẾT QUẢ PHÂN TÍCH =====
-
 
 // ===== RENDER KẾT QUẢ PHÂN TÍCH =====
 function renderAnalysisResult(originalUrl, info) {
