@@ -402,7 +402,8 @@ func (a *App) Analyze(urlStr string) (*downloader.MediaInfo, error) {
 		strings.Contains(urlLower, "avgle.com") ||
 		strings.Contains(urlLower, "tokyomotion") ||
 		strings.Contains(urlLower, "vlxx") ||
-		strings.Contains(urlLower, "vlstream")
+		strings.Contains(urlLower, "vlstream") ||
+		strings.Contains(urlLower, "sextb.net")
 
 	if isCustomSite {
 		runtime.LogInfof(a.ctx, "Analyzer: Sử dụng bộ trích xuất Go-native cho trang custom: %s", urlStr)
@@ -438,6 +439,10 @@ func (a *App) Analyze(urlStr string) (*downloader.MediaInfo, error) {
 func (a *App) AnalyzeWithAI(pageURL string) (*downloader.ExtractResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
+
+	if strings.Contains(strings.ToLower(pageURL), "sextb.net") {
+		return downloader.ExtractPackedPlayer(ctx, pageURL)
+	}
 
 	// Lấy thumbnail/title từ og:image và <title>
 	getTitleAndThumb := func(html string) (string, string) {
