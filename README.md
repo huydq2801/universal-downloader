@@ -1,18 +1,17 @@
 # 🚀 UniversalDownloader
 
-> A high-performance, general-purpose media and video downloader designed to fetch streams from any website, bypassing standard network restrictions, firewalls, and advanced stream protection.
+> A high-performance standalone desktop media and video downloader designed to fetch and save streams from any website, bypassing network restrictions, DNS/IP blocks, and custom stream encapsulation.
 
 ## 🛠️ System Architecture
 
 ```
-Chrome Extension  ──(Network Sniffer)──→  Go Backend (Wails)  ──(Parallel Downloader)──→  Final MP4 File
-                                                  │
-                                                  └──→  yt-dlp / FFmpeg (Standard Platform Fallback)
+User Input URL  ──→  Go Backend (Wails)  ──(Parallel Downloader)──→  Final MP4 File
+                             │
+                             └──→  yt-dlp / FFmpeg (Standard Platform Fallback)
 ```
 
-- **Chrome Extension**: Intercepts media-related network requests (XHR, fetch, m3u8, MPD, blob URLs) and forwards them directly to the desktop app.
-- **Go Desktop App**: Manages the download queue, resolves domain names bypassing local censorship/blocks, downloads HLS segments concurrently, decapsulates masked headers, and packages media streams.
-- **yt-dlp + FFmpeg Integration**: Acts as a fallback engine to download and merge streams from mainstream platforms (YouTube, TikTok, etc.).
+- **Go Desktop App (Wails)**: Standalone desktop GUI that manages the download queue, resolves domain names using direct DNS, downloads HLS segments concurrently, decapsulates masked headers, and packages media streams.
+- **yt-dlp + FFmpeg Integration**: Integrated backend engines to download and remux streams from mainstream video sharing platforms (YouTube, TikTok, etc.).
 
 ---
 
@@ -62,25 +61,15 @@ cd desktop-app
 wails dev
 ```
 
-### Install Chrome Extension
-1. Open Google Chrome and go to `chrome://extensions/`.
-2. Enable **Developer mode** in the top-right corner.
-3. Click **Load unpacked** and select the `chrome-extension/` directory in the root of the project.
-
 ---
 
 ## 📂 Project Structure
 
 ```
 universal-downloader/
-├── chrome-extension/     # Chrome Extension (Manifest V3) for network sniffing
-│   ├── background/       # Service worker listening to network requests
-│   ├── content/          # Content scripts hooking blob/fetch APIs
-│   └── popup/            # Extension UI for manually sending links to desktop app
 └── desktop-app/          # Wails Desktop App (Go + JS Frontend)
     ├── app.go            # Wails binding interface & bridge controller
     ├── internal/
-    │   ├── server/       # Local API server receiving payloads from extension
     │   ├── downloader/   # Media download engine: yt-dlp, FFmpeg, and Custom HLS
     │   │   ├── engine.go       # Downloader routing controller
     │   │   └── custom_hls.go   # Parallel segment downloader & decapsulator
