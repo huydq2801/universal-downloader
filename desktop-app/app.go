@@ -370,6 +370,69 @@ func (a *App) extractIframeURLs(htmlContent, baseURL string) []string {
 	return urls
 }
 
+// extractResultToMediaInfo chuyển đổi ExtractResult từ bộ trích xuất custom sang cấu trúc MediaInfo đồng nhất
+func extractResultToMediaInfo(res *downloader.ExtractResult, webpageURL string) *downloader.MediaInfo {
+	formats := make([]downloader.FormatInfo, len(res.Formats))
+	for i, f := range res.Formats {
+		formats[i] = downloader.FormatInfo{
+			FormatID:   f.URL, // Lưu trực tiếp URL stream vào format_id để JS gọi tải HLS
+			FormatNote: f.Quality,
+			Extension:  f.Ext,
+			URL:        f.URL,
+		}
+	}
+	return &downloader.MediaInfo{
+		Title:     res.Title,
+		Thumbnail: res.Thumbnail,
+		Formats:   formats,
+		URL:       webpageURL,
+	}
+}
+
+// Analyze là hàm phân tích hợp nhất duy nhất. Nó tự động quyết định phương thức tốt nhất cho từng URL:
+//   - Nếu là trang custom được hỗ trợ trực tiếp (123av, supjav, v.v.): dùng bộ trích xuất Go-native trước.
+//   - Với các trang thông thường (YouTube, TikTok, Facebook, ...): sử dụng yt-dlp.
+//   - Nếu cả hai thất bại, sử dụng bộ trích xuất AI (Gemini) làm chốt chặn cuối cùng.
+func (a *App) Analyze(urlStr string) (*downloader.MediaInfo, error) {
+	urlLower := strings.ToLower(urlStr)
+
+	// Các trang có mã nguồn tùy chỉnh hỗ trợ trực tiếp bằng Go
+	isCustomSite := strings.Contains(urlLower, "123av.com") ||
+		strings.Contains(urlLower, "supjav.com") ||
+		strings.Contains(urlLower, "avgle.com") ||
+		strings.Contains(urlLower, "tokyomotion") ||
+		strings.Contains(urlLower, "vlxx") ||
+		strings.Contains(urlLower, "vlstream")
+
+	if isCustomSite {
+		runtime.LogInfof(a.ctx, "Analyzer: Sử dụng bộ trích xuất Go-native cho trang custom: %s", urlStr)
+		res, err := a.AnalyzeWithAI(urlStr)
+		if err == nil && res != nil && len(res.Formats) > 0 {
+			return extractResultToMediaInfo(res, urlStr), nil
+		}
+		runtime.LogErrorf(a.ctx, "Analyzer: Bộ trích xuất Go-native thất bại: %v. Thử phương án thay thế...", err)
+	}
+
+	// Thử phân tích bằng yt-dlp cho các trang phổ thông hoặc làm fallback
+	runtime.LogInfof(a.ctx, "Analyzer: Thử phân tích bằng yt-dlp cho URL: %s", urlStr)
+	info, err := a.GetInfo(urlStr)
+	if err == nil && info != nil && len(info.Formats) > 0 {
+		return info, nil
+	}
+	runtime.LogErrorf(a.ctx, "Analyzer: Phân tích bằng yt-dlp thất bại: %v", err)
+
+	// Nếu yt-dlp thất bại và chưa chạy AI, thử trích xuất HTML/AI (Gemini) làm chốt chặn cuối cùng
+	if !isCustomSite {
+		runtime.LogInfof(a.ctx, "Analyzer: Sử dụng bộ trích xuất HTML/AI làm chốt chặn cuối cùng cho URL: %s", urlStr)
+		res, err := a.AnalyzeWithAI(urlStr)
+		if err == nil && res != nil && len(res.Formats) > 0 {
+			return extractResultToMediaInfo(res, urlStr), nil
+		}
+	}
+
+	return nil, fmt.Errorf("không thể phân tích đường dẫn này bằng bất kỳ phương pháp nào")
+}
+
 // AnalyzeWithAI cào trang, phát hiện player nhúng, trích xuất link stream trực tiếp
 // Không cần Gemini AI — dùng parser tự viết nhanh và chính xác 100%
 func (a *App) AnalyzeWithAI(pageURL string) (*downloader.ExtractResult, error) {
