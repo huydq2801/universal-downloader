@@ -267,23 +267,43 @@ func ExtractPackedPlayer(ctx context.Context, pageURL string) (*ExtractResult, e
 				// Tìm các liên kết video (m3u8, txt, mp4,...) ở cả dạng tuyệt đối và tương đối
 				m3u8Re := regexp.MustCompile(`["']((?:https?://[^"']+|/[^"']+)\.(?:m3u8|txt|mp4)[^"']*)["']`)
 				m3u8Matches := m3u8Re.FindAllStringSubmatch(unpackedJS, -1)
+				
+				var relativeStreams []string
+				var absoluteStreams []string
 				seenStream := make(map[string]bool)
+
 				for _, match := range m3u8Matches {
 					streamURL := match[1]
+					if seenStream[streamURL] {
+						continue
+					}
+					seenStream[streamURL] = true
+
 					if strings.HasPrefix(streamURL, "/") {
 						// Phân giải đường dẫn tương đối dựa trên URL cuối của iframe
 						baseURL, err := url.Parse(finalIframeURL)
 						if err == nil {
 							refURL, err := url.Parse(streamURL)
 							if err == nil {
-								streamURL = baseURL.ResolveReference(refURL).String()
+								resolved := baseURL.ResolveReference(refURL).String()
+								relativeStreams = append(relativeStreams, resolved)
 							}
 						}
+					} else {
+						absoluteStreams = append(absoluteStreams, streamURL)
 					}
-					if seenStream[streamURL] {
-						continue
-					}
-					seenStream[streamURL] = true
+				}
+
+				// Lựa chọn thông minh: Nếu có luồng tương đối (luôn chạy tốt nhất trực tiếp trên host player), chỉ dùng luồng đó.
+				// Ngược lại mới dùng các luồng CDN tuyệt đối (dễ bị lỗi 502/chặn) để tối giản danh sách định dạng cho người dùng.
+				var chosenStreams []string
+				if len(relativeStreams) > 0 {
+					chosenStreams = relativeStreams
+				} else {
+					chosenStreams = absoluteStreams
+				}
+
+				for _, streamURL := range chosenStreams {
 					hasPacker = true
 					formats = append(formats, AIFormatInfo{
 						Title:   fmt.Sprintf("%s - Server %s (Direct HLS)", title, sv.name),
